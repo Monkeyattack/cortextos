@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Capture the PTY exit handler so tests can simulate exits at controlled times
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
@@ -8,6 +8,7 @@ const mockPty = {
   kill: vi.fn(),
   write: vi.fn(),
   getPid: vi.fn().mockReturnValue(12345),
+  isAlive: vi.fn().mockReturnValue(true),
   onExit: vi.fn().mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
     capturedOnExit = cb;
   }),
@@ -17,8 +18,9 @@ vi.mock('../../../src/pty/agent-pty.js', () => ({
   AgentPTY: function AgentPTY() { return mockPty; },
 }));
 
+const mockInjectMessage = vi.fn();
 vi.mock('../../../src/pty/inject.js', () => ({
-  injectMessage: vi.fn(),
+  injectMessage: mockInjectMessage,
   MessageDedup: class { isDuplicate() { return false; } },
 }));
 
@@ -68,7 +70,10 @@ beforeEach(() => {
   mockPty.spawn.mockClear();
   mockPty.kill.mockClear();
   mockPty.write.mockClear();
+  mockPty.isAlive.mockClear();
+  mockPty.isAlive.mockReturnValue(true);
   mockPty.onExit.mockClear();
+  mockInjectMessage.mockClear();
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
@@ -142,5 +147,145 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     const stopOrder = stopSpy.mock.invocationCallOrder[0];
     const startOrder = startSpy.mock.invocationCallOrder[0];
     expect(stopOrder).toBeLessThan(startOrder);
+  });
+});
+
+describe('AgentProcess - cron auto-verification', () => {
+  it('scheduleCronVerification() is a no-op when config has no crons', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    // Should not throw, should not schedule anything
+    ap.scheduleCronVerification();
+    // No inject calls expected (beyond any from start)
+    expect(mockInjectMessage).not.toHaveBeenCalled();
+  });
+
+  it('scheduleCronVerification() is a no-op when config has only once crons', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {
+      crons: [{ name: 'reminder', type: 'once' as const, fire_at: '2099-01-01T00:00:00Z', prompt: 'test' }],
+    });
+    await ap.start();
+    ap.scheduleCronVerification();
+    // Wait briefly to confirm nothing fires
+    await new Promise(r => setTimeout(r, 100));
+    expect(mockInjectMessage).not.toHaveBeenCalled();
+  });
+
+  it('scheduleCronVerification() schedules verification when config has recurring crons', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {
+      crons: [
+        { name: 'heartbeat', interval: '4h', prompt: 'check in' },
+        { name: 'research', type: 'recurring' as const, interval: '24h', prompt: 'research' },
+      ],
+    });
+    await ap.start();
+    // This should not throw — verification runs in background
+    ap.scheduleCronVerification();
+    // Verification is waiting for idle flag — no immediate injection
+    expect(mockInjectMessage).not.toHaveBeenCalled();
+  });
+
+  it('verifyCronsAfterIdle: injects prompt containing cron names once idle flag appears newer than boot', async () => {
+    const fs = await import('fs');
+    const mockExistsSync = vi.mocked(fs.existsSync);
+    const mockReadFileSync = vi.mocked(fs.readFileSync);
+
+    const bootTs = 1000;
+    const idleTs = 2000;
+
+    // Track calls so the first read (boot snapshot) returns bootTs,
+    // subsequent reads (poll) return idleTs (agent went idle)
+    let readCount = 0;
+    mockExistsSync.mockImplementation((p) => {
+      if (typeof p === 'string' && p.endsWith('last_idle.flag')) return true;
+      return false;
+    });
+    mockReadFileSync.mockImplementation((p) => {
+      if (typeof p === 'string' && p.endsWith('last_idle.flag')) {
+        readCount++;
+        return readCount === 1 ? String(bootTs) : String(idleTs);
+      }
+      return '';
+    });
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {
+        crons: [
+          { name: 'heartbeat', interval: '4h', prompt: 'check in' },
+          { name: 'daily-report', interval: '24h', prompt: 'report' },
+        ],
+      });
+      await ap.start();
+
+      ap.scheduleCronVerification();
+
+      // Advance past the 15s poll interval so the background loop wakes,
+      // reads the newer flag timestamp, and injects the verification prompt
+      await vi.advanceTimersByTimeAsync(16_000);
+    } finally {
+      vi.useRealTimers();
+      // Restore default fs mock behaviour for other tests
+      mockExistsSync.mockReturnValue(false);
+      mockReadFileSync.mockReset();
+    }
+
+    expect(mockInjectMessage).toHaveBeenCalledOnce();
+    const promptArg: string = mockInjectMessage.mock.calls[0][1] as string;
+    expect(promptArg).toContain('heartbeat');
+    expect(promptArg).toContain('daily-report');
+  });
+});
+
+describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
+  it('fires sessionRefresh when config on disk still matches original short duration', async () => {
+    const refreshSpy = vi.fn().mockResolvedValue(undefined);
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, { max_session_seconds: 1 });
+      vi.spyOn(ap, 'sessionRefresh').mockImplementation(refreshSpy);
+      await ap.start();
+      await vi.advanceTimersByTimeAsync(2000);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(refreshSpy).toHaveBeenCalledOnce();
+  });
+
+  it('reschedules when config.json on disk has a longer max_session_seconds', async () => {
+    const fs = await import('fs');
+    const mockExistsSync = vi.mocked(fs.existsSync);
+    const mockReadFileSync = vi.mocked(fs.readFileSync);
+
+    const refreshSpy = vi.fn().mockResolvedValue(undefined);
+
+    // Config on disk says 1 hour — much longer than initial 1s
+    mockExistsSync.mockImplementation((p: unknown) =>
+      typeof p === 'string' && p.endsWith('config.json'),
+    );
+    mockReadFileSync.mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && p.endsWith('config.json')) {
+        return JSON.stringify({ max_session_seconds: 3600 });
+      }
+      return '';
+    });
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, { max_session_seconds: 1 });
+      vi.spyOn(ap, 'sessionRefresh').mockImplementation(refreshSpy);
+      await ap.start();
+      // Advance past the initial 1s timer — should reschedule, not fire refresh
+      await vi.advanceTimersByTimeAsync(2000);
+    } finally {
+      vi.useRealTimers();
+      mockExistsSync.mockReturnValue(false);
+      mockReadFileSync.mockReset();
+    }
+
+    // sessionRefresh must NOT have been called — config said 1h, not 1s
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 });

@@ -188,10 +188,17 @@ export class AgentProcess {
       } catch {
         // Ignore write errors during shutdown
       }
-      try {
-        pty.kill();
-      } catch {
-        // PTY may have already exited — ignore
+      // BUG-032 follow-up: only kill the PTY if the process is still alive.
+      // After /exit + 5s wait, the child has usually exited cleanly. Calling
+      // pty.kill() on an already-exited PTY tears down the file descriptor,
+      // which can send SIGHUP (exit code 129) to a process that was in the
+      // middle of flushing. Polling first eliminates the remaining SIGHUP risk.
+      if (pty.isAlive()) {
+        try {
+          pty.kill();
+        } catch {
+          // PTY may have exited between the check and the kill — ignore
+        }
       }
 
       // BUG-011 fix: AWAIT the exit handler before resolving stop().
@@ -427,11 +434,42 @@ export class AgentProcess {
   }
 
   private startSessionTimer(): void {
-    const maxSession = (this.config.max_session_seconds || 255600) * 1000;
-    this.sessionTimer = setTimeout(() => {
-      this.log(`Session timer fired after ${maxSession / 1000}s`);
-      this.sessionRefresh().catch(err => this.log(`Session refresh failed: ${err}`));
-    }, maxSession);
+    const DEFAULT_MAX_SESSION_S = 255600;
+    const startedAt = Date.now();
+    const initialMs = (this.config.max_session_seconds || DEFAULT_MAX_SESSION_S) * 1000;
+
+    // BUG-048 fix: re-read max_session_seconds from config.json on each timer
+    // fire so that config changes after start() take effect. Without this, a
+    // briefly-low max_session_seconds baked at start time causes a fleet-wide
+    // simultaneous restart when all agents hit the same stale deadline.
+    const scheduleCheck = (delayMs: number): void => {
+      this.sessionTimer = setTimeout(() => {
+        // Re-read current config from disk
+        let currentMaxMs = initialMs;
+        try {
+          const configPath = join(this.env.agentDir, 'config.json');
+          if (existsSync(configPath)) {
+            const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+            currentMaxMs = (cfg.max_session_seconds || DEFAULT_MAX_SESSION_S) * 1000;
+          }
+        } catch { /* use initial value on read error */ }
+
+        const elapsedMs = Date.now() - startedAt;
+        const remainingMs = currentMaxMs - elapsedMs;
+
+        if (remainingMs > 5000) {
+          // Config was updated to a longer duration — reschedule for the remaining time.
+          this.log(`Session timer: config updated to ${currentMaxMs / 1000}s, rescheduling (${Math.round(remainingMs / 1000)}s remaining)`);
+          scheduleCheck(remainingMs);
+          return;
+        }
+
+        this.log(`Session timer fired after ${Math.round(elapsedMs / 1000)}s (limit: ${currentMaxMs / 1000}s)`);
+        this.sessionRefresh().catch(err => this.log(`Session refresh failed: ${err}`));
+      }, delayMs);
+    };
+
+    scheduleCheck(initialMs);
   }
 
   private clearSessionTimer(): void {
@@ -461,6 +499,101 @@ export class AgentProcess {
   private notifyStatusChange(): void {
     if (this.onStatusChange) {
       this.onStatusChange(this.getStatus());
+    }
+  }
+
+  /**
+   * Schedule a background cron verification check.
+   *
+   * Waits for the agent to finish its startup sequence (detected via the
+   * last_idle.flag written by the Stop hook after the agent's first turn
+   * completes), then injects a lightweight prompt asking the agent to
+   * verify its crons match config.json and restore any that are missing.
+   *
+   * Safe for both fresh starts and --continue restarts: the idle-wait
+   * ensures we never inject mid-conversation.
+   *
+   * Fire-and-forget: errors are logged but never propagated.
+   */
+  scheduleCronVerification(): void {
+    const crons = this.config.crons;
+    if (!crons || crons.length === 0) return;
+
+    const recurringNames = crons
+      .filter(c => c.type !== 'once')
+      .map(c => c.name);
+    if (recurringNames.length === 0) return;
+
+    const generation = this.lifecycleGeneration;
+
+    // Run in background — don't block startup
+    this.verifyCronsAfterIdle(recurringNames, generation).catch(err => {
+      this.log(`Cron verification failed (non-fatal): ${err}`);
+    });
+  }
+
+  private async verifyCronsAfterIdle(
+    expectedCrons: string[],
+    generation: number,
+  ): Promise<void> {
+    const stateDir = join(this.env.ctxRoot, 'state', this.name);
+    const flagPath = join(stateDir, 'last_idle.flag');
+
+    // Record the idle flag timestamp at boot so we can detect the NEXT idle
+    // (i.e. after the agent has finished processing its startup prompt).
+    let bootIdleTs = 0;
+    try {
+      if (existsSync(flagPath)) {
+        bootIdleTs = parseInt(readFileSync(flagPath, 'utf-8').trim(), 10);
+      }
+    } catch { /* ignore */ }
+
+    // Wait up to 10 minutes for the agent to finish its startup turn.
+    // Poll every 15s. Bail if the agent stopped or a new lifecycle started.
+    const maxWaitMs = 10 * 60 * 1000;
+    const pollMs = 15_000;
+    const startTime = Date.now();
+    let foundIdle = false;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      // Bail if this lifecycle is stale (agent restarted or stopped)
+      if (generation !== this.lifecycleGeneration || this.status !== 'running') {
+        return;
+      }
+
+      await sleep(pollMs);
+
+      try {
+        if (existsSync(flagPath)) {
+          const currentIdleTs = parseInt(readFileSync(flagPath, 'utf-8').trim(), 10);
+          if (currentIdleTs > bootIdleTs) {
+            // Agent has gone idle after boot — safe to inject
+            foundIdle = true;
+            break;
+          }
+        }
+      } catch { /* ignore read errors, keep polling */ }
+    }
+
+    // If the loop timed out without detecting an idle transition, do not inject:
+    // the agent never finished its startup turn (e.g. stuck on a very long boot).
+    if (!foundIdle) {
+      this.log('Cron verification: timed out waiting for idle flag, skipping injection');
+      return;
+    }
+
+    // Final stale check
+    if (generation !== this.lifecycleGeneration || this.status !== 'running') {
+      return;
+    }
+
+    // Inject the verification prompt
+    const cronList = expectedCrons.join(', ');
+    const verifyPrompt = `[SYSTEM] Cron verification: your config.json defines these recurring crons: ${cronList}. Run CronList now. If any are missing, restore them from config.json using /loop. This is an automated safety check.`;
+
+    this.log(`Injecting cron verification (expecting: ${cronList})`);
+    if (this.pty) {
+      injectMessage((data) => this.pty!.write(data), verifyPrompt);
     }
   }
 }

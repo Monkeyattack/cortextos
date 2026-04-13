@@ -81,9 +81,16 @@ class Daemon {
       process.exit(0);
     };
 
-    // Wrap in a synchronous handler that catches unhandled promise rejections
-    // so a shutdown error never leaves the process hanging.
+    // BUG-003 fix: re-entrancy guard. A second SIGTERM arriving while
+    // shutdown() is in flight would start a parallel stopAll(), causing
+    // unpredictable signal cascades across child PTY processes.
+    let shuttingDown = false;
     const handleSignal = () => {
+      if (shuttingDown) {
+        console.log('[daemon] Shutdown already in progress, ignoring signal');
+        return;
+      }
+      shuttingDown = true;
       shutdown().catch((err) => {
         console.error('[daemon] Fatal shutdown error:', err);
         process.exit(1);
@@ -106,9 +113,15 @@ class Daemon {
   }
 }
 
-// Start daemon
-const daemon = new Daemon();
-daemon.start().catch(err => {
-  console.error('[daemon] Fatal error:', err);
-  process.exit(1);
-});
+// Only auto-start when run directly (e.g. `node dist/daemon.js` or via PM2).
+// Guarding with require.main prevents accidental daemon spawn when the module
+// is require()'d for testing or class imports — which would start a full daemon
+// with TelegramPollers, IPC server, and Claude PTY processes as a side effect.
+// See: https://github.com/grandamenium/cortextos/issues/44
+if (require.main === module) {
+  const daemon = new Daemon();
+  daemon.start().catch(err => {
+    console.error('[daemon] Fatal error:', err);
+    process.exit(1);
+  });
+}
