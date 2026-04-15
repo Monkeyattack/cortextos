@@ -69,9 +69,11 @@ export async function middleware(request: NextRequest) {
 
   // Allow public paths
   // Security (H7): SSE endpoints require ?token=<jwt> auth — removed from public whitelist
+  // /api/flip-signal is intentionally public: read-only GO/SKIP for NT8 NinjaScript (no auth header possible)
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/flip-signal') ||
     pathname.startsWith('/_next') ||
     pathname === '/favicon.ico'
   ) {
