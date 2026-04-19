@@ -43,6 +43,9 @@ export class AgentProcess {
   // from an old PTY can race past stopRequested and trigger crash recovery on
   // the new agent.
   private lifecycleGeneration: number = 0;
+  // Guard: only one cron verification waiter in-flight per agent at a time.
+  // Rapid --continue restarts must not stack duplicate waiters. (Issue #182)
+  private cronVerificationPending: boolean = false;
   // BUG-011 fix: stop() awaits this promise (resolved by the onExit handler in start())
   // to guarantee the PTY exit has fired before stopping=false is reset. Without
   // this, the exit handler can fire after stopping=false and trigger spurious
@@ -622,16 +625,24 @@ export class AgentProcess {
     if (!crons || crons.length === 0) return;
 
     const recurringNames = crons
-      .filter(c => c.type !== 'once')
+      .filter(c => c.type !== 'once' && c.type !== 'disabled')
       .map(c => c.name);
     if (recurringNames.length === 0) return;
+
+    // Dedup: only one waiter in-flight per agent. Rapid --continue restarts
+    // would otherwise stack multiple concurrent waiters. (Issue #182)
+    if (this.cronVerificationPending) {
+      this.log('Cron verification already pending — skipping duplicate');
+      return;
+    }
 
     const generation = this.lifecycleGeneration;
 
     // Run in background — don't block startup
-    this.verifyCronsAfterIdle(recurringNames, generation).catch(err => {
-      this.log(`Cron verification failed (non-fatal): ${err}`);
-    });
+    this.cronVerificationPending = true;
+    this.verifyCronsAfterIdle(recurringNames, generation)
+      .catch(err => { this.log(`Cron verification failed (non-fatal): ${err}`); })
+      .finally(() => { this.cronVerificationPending = false; });
   }
 
   /**
@@ -647,7 +658,7 @@ export class AgentProcess {
 
     // Only monitor recurring crons with a parseable interval (skip cron expressions)
     const monitorable = crons.filter(
-      c => c.type !== 'once' && c.interval && !isNaN(parseDurationMs(c.interval)),
+      c => c.type !== 'once' && c.type !== 'disabled' && c.interval && !isNaN(parseDurationMs(c.interval)),
     );
     if (monitorable.length === 0) return;
 
@@ -705,6 +716,11 @@ export class AgentProcess {
           this.log(`Gap nudge: ${cronDef.name} silent ${gapMin}min (threshold: ${Math.round(threshold / 60_000)}min)`);
           if (this.pty && this.status === 'running') {
             injectMessage((data) => this.pty!.write(data), nudge);
+            // Stagger: wait between nudges so the agent can process each one
+            // before the next arrives. Without this, N simultaneous stale crons
+            // fire N back-to-back injections, spiking context and triggering
+            // ctx-watchdog restarts. (Issue #182)
+            await sleep(30_000);
           }
         }
       }
@@ -729,9 +745,10 @@ export class AgentProcess {
       }
     } catch { /* ignore */ }
 
-    // Wait up to 10 minutes for the agent to finish its startup turn.
-    // Poll every 15s. Bail if the agent stopped or a new lifecycle started.
-    const maxWaitMs = 10 * 60 * 1000;
+    // Wait up to 30 minutes for the agent to finish its startup turn.
+    // 10 min was too short — agents busy processing gap nudge bursts would
+    // never go idle in time and the verification would silently drop. (Issue #182)
+    const maxWaitMs = 30 * 60 * 1000;
     const pollMs = 15_000;
     const startTime = Date.now();
     let foundIdle = false;
