@@ -100,6 +100,13 @@ describe('TelegramAPI.sendMessage HTML mode', () => {
     expect(callLog[0].body.text).toBe('$50 budget at $100 hard-block');
   });
 
+  it('converts [text](url) to <a href="url">text</a>', async () => {
+    queue({ status: 200, body: { ok: true, result: { message_id: 1 } } });
+    const api = new TelegramAPI('111:AAA');
+    await api.sendMessage('chat1', 'check [the docs](https://example.com/docs)');
+    expect(callLog[0].body.text).toBe('check <a href="https://example.com/docs">the docs</a>');
+  });
+
   it('underscores in filenames/flags are not dropped', async () => {
     queue({ status: 200, body: { ok: true, result: { message_id: 1 } } });
     const api = new TelegramAPI('111:AAA');

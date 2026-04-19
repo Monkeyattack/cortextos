@@ -167,6 +167,7 @@ export class TelegramAPI {
    *   3. Inline code (`...`) → <code>...</code>
    *   4. Bold (*...*) → <b>...</b>
    *   5. Italic (_..._) — word-boundary aware to avoid snake_case false positives
+   *   6. Links ([text](url)) → <a href="url">text</a>
    *
    * Pass `plainText: true` to skip conversion (just HTML-escape and send raw).
    */
@@ -192,6 +193,9 @@ export class TelegramAPI {
 
     // Step 5: Italic — _text_ with word-boundary guard (no newlines)
     html = html.replace(/(?<![_\w])_([^_\n]+)_(?![_\w])/g, '<i>$1</i>');
+
+    // Step 6: Links — [text](url). URL may contain HTML-escaped & (&amp;) which is fine.
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>');
 
     return html;
   }
