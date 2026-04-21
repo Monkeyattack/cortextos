@@ -21,6 +21,9 @@ const allowedDevOrigins = [
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['better-sqlite3'],
+  outputFileTracingExcludes: {
+    '*': ['../knowledge-base/**'],
+  },
   ...(allowedDevOrigins.length > 0 && { allowedDevOrigins }),
   async headers() {
     return [
