@@ -65,4 +65,14 @@ const crashAlertCommand = new Command('crash-alert')
   });
 program.addCommand(crashAlertCommand);
 
+// hook-scrape-usage: SessionEnd hook — read JSONL transcript and store token usage
+const hookScrapeUsageCommand = new Command('hook-scrape-usage')
+  .description('SessionEnd hook: read JSONL transcript and store session token usage')
+  .action(() => {
+    const hookPath = join(__dirname, 'hooks/hook-scrape-usage.js');
+    const result = spawnSync(process.execPath, [hookPath], { stdio: 'inherit' });
+    process.exit(result.status ?? 0);
+  });
+program.addCommand(hookScrapeUsageCommand);
+
 program.parse();
