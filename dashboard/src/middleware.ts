@@ -74,6 +74,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/flip-signal') ||
+    pathname.startsWith('/api/orb-status') ||
     pathname.startsWith('/_next') ||
     pathname === '/favicon.ico'
   ) {
