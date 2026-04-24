@@ -628,7 +628,7 @@ busCommand
   .description('Plan a hard restart (fresh session, no --continue)')
   .option('--reason <why>', 'Reason for restart')
   .option('--handoff-doc <path>', 'Path to handoff document to inject into next session boot prompt')
-  .action((opts: { reason?: string; handoffDoc?: string }) => {
+  .action(async (opts: { reason?: string; handoffDoc?: string }) => {
     const { writeFileSync: fsWrite, existsSync: fsExists, mkdirSync: fsMkdir } = require('fs');
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
@@ -637,7 +637,22 @@ busCommand
       fsMkdir(paths.stateDir, { recursive: true });
       fsWrite(join(paths.stateDir, '.handoff-doc-path'), opts.handoffDoc + '\n', 'utf-8');
     }
-    console.log('Hard restart planned');
+    // Send IPC restart-agent so the daemon terminates and restarts this session
+    // immediately. Without this the session keeps running — .force-fresh is only
+    // consumed on the NEXT restart, which never comes unless the daemon is notified.
+    const ipc = new IPCClient(env.instanceId);
+    const daemonRunning = await ipc.isDaemonRunning();
+    if (daemonRunning) {
+      const resp = await ipc.send({ type: 'restart-agent', agent: env.agentName, source: 'cortextos bus hard-restart' });
+      if (resp.success) {
+        console.log(`Hard restart triggered for ${env.agentName} — fresh session incoming`);
+      } else {
+        console.error(`Daemon restart failed: ${resp.error}`);
+        process.exit(1);
+      }
+    } else {
+      console.log('Hard restart planned (daemon not running — will take effect on next start)');
+    }
   });
 
 busCommand
@@ -732,13 +747,19 @@ busCommand
   .option('--score <n>', 'Score 1-10')
   .option('--justification <text>', 'Justification text')
   .action((id: string, value: string, opts: { score?: string; justification?: string }) => {
-    const env = resolveEnv();
-    const agentDir = env.agentDir || process.cwd();
-    const experiment = evaluateExperiment(agentDir, id, parseFloat(value), {
-      score: opts.score ? parseInt(opts.score, 10) : undefined,
-      justification: opts.justification,
-    });
-    console.log(JSON.stringify(experiment, null, 2));
+    try {
+      const env = resolveEnv();
+      const agentDir = env.agentDir || process.cwd();
+      const experiment = evaluateExperiment(agentDir, id, parseFloat(value), {
+        score: opts.score ? parseInt(opts.score, 10) : undefined,
+        justification: opts.justification,
+      });
+      console.log(JSON.stringify(experiment, null, 2));
+      process.exit(0);
+    } catch (err) {
+      console.error(String(err));
+      process.exit(1);
+    }
   });
 
 busCommand
