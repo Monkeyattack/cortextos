@@ -56,7 +56,7 @@ export function syncTasks(org: string): number {
       (@id, @title, @description, @status, @priority, @assignee, @org, @project, @needs_approval, @created_at, @updated_at, @completed_at, @notes, @source_file)
   `);
 
-  const files = fs.readdirSync(taskDir).filter((f) => f.endsWith('.json') && !f.startsWith('._'));
+  const files = fs.readdirSync(taskDir).filter((f) => f.endsWith('.json'));
   console.log(`[sync] Found ${files.length} task files in ${taskDir}`);
 
   const run = db.transaction(() => {
@@ -129,7 +129,7 @@ export function syncApprovals(org: string): number {
       const dir = path.join(approvalDir, subdir);
       if (!fs.existsSync(dir)) continue;
 
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('._'));
+      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
       for (const file of files) {
         const filePath = path.join(dir, file);
         if (!hasFileChanged(filePath)) continue;

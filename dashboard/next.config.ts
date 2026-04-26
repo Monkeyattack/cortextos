@@ -11,23 +11,18 @@ import type { NextConfig } from "next";
 // IPs to whitelist (e.g. "100.64.95.40,mybox.local,dashboard.example.com").
 // Localhost is always allowed. Only reads in development; production builds
 // ignore the setting.
-const allowedDevOrigins = [
-  'cc.profithits.app',
-  ...(process.env.DASHBOARD_ALLOWED_DEV_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-];
+const allowedDevOrigins = (process.env.DASHBOARD_ALLOWED_DEV_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['better-sqlite3'],
-  outputFileTracingExcludes: {
-    '*': ['../knowledge-base/**'],
-  },
   ...(allowedDevOrigins.length > 0 && { allowedDevOrigins }),
   async headers() {
     return [
       {
+        // Prevent aggressive caching of API routes and pages through the tunnel
         source: '/((?!_next/static).*)',
         headers: [
           { key: 'Cache-Control', value: 'no-store, must-revalidate' },
