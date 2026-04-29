@@ -1,6 +1,6 @@
 import { execSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync } from 'fs';
-import { join, extname } from 'path';
+import { join, extname, basename } from 'path';
 import { readdirSync } from 'fs';
 import { ensureDir } from '../utils/atomic.js';
 import { TelegramAPI } from '../telegram/api.js';
@@ -44,6 +44,22 @@ const EXCLUDED_DIR_PREFIXES = [
 ];
 
 const CREDENTIAL_PATTERNS = /(?:token=|key=|password=|secret=|sk-|ghp_|xoxb-|AKIA)/;
+
+// Lock files routinely contain integrity hashes that look like credential
+// patterns to the regex above (e.g. sha512 base64 happening to embed `token=`
+// as 6 consecutive chars). False-positive whitelist by basename.
+const CREDENTIAL_SCAN_BASENAME_ALLOWLIST = new Set([
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+  'Cargo.lock',
+  'Pipfile.lock',
+  'poetry.lock',
+  'composer.lock',
+  'Gemfile.lock',
+  'go.sum',
+]);
 
 const SCRIPT_EXTENSIONS = new Set(['.sh', '.py', '.js']);
 
@@ -168,8 +184,15 @@ export function autoCommit(projectDir: string, dryRun: boolean = false): AutoCom
       }
     }
 
-    // Check credential patterns in non-script file content
-    if (existsSync(fullPath) && !SCRIPT_EXTENSIONS.has(ext)) {
+    // Check credential patterns in non-script file content. Lock files are
+    // exempt — their integrity hashes routinely embed substrings that the
+    // regex flags as `token=` / `key=` etc.
+    const fileBasename = basename(file);
+    if (
+      existsSync(fullPath) &&
+      !SCRIPT_EXTENSIONS.has(ext) &&
+      !CREDENTIAL_SCAN_BASENAME_ALLOWLIST.has(fileBasename)
+    ) {
       try {
         const stat = statSync(fullPath);
         if (stat.isFile() && stat.size < MAX_FILE_SIZE) {
