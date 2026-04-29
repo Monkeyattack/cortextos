@@ -4,6 +4,7 @@ import type { EventCategory, EventSeverity, BusPaths } from '../types/index.js';
 import { ensureDir } from '../utils/atomic.js';
 import { randomString } from '../utils/random.js';
 import { validateEventCategory, validateEventSeverity, isValidJson } from '../utils/validate.js';
+import { touchHeartbeat } from './heartbeat.js';
 
 /**
  * Log a structured event. Appends JSONL line to daily event file.
@@ -54,4 +55,9 @@ export function logEvent(
   });
 
   appendFileSync(join(eventsDir, `${today}.jsonl`), eventLine + '\n', 'utf-8');
+
+  // Any bus event is a sign of life — touch heartbeat.json so the dashboard
+  // gap-detector doesn't flag the agent STALE just because they didn't also
+  // call `update-heartbeat`. No-op when heartbeat.json doesn't exist yet.
+  touchHeartbeat(paths, agentName);
 }
