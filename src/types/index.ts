@@ -68,6 +68,14 @@ export interface Task {
    */
   blocks?: string[];
   blocked_by?: string[];
+  /**
+   * Optional structured metadata. Used by error-triggered tasks (e.g.
+   * ai-theist render workers' failure-trigger helper) to carry
+   * `triggered_by_event_id` so the task can be programmatically
+   * correlated with the upstream event that caused it. Free-form bag —
+   * the writer owns the schema. Read by autoresearch / dashboard.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 // Event Types

@@ -149,10 +149,27 @@ busCommand
   .option('--needs-approval', 'Require human approval before execution')
   .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
   .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
+  .option('--meta <json>', 'Structured metadata as a JSON object (e.g. \'{"triggered_by_event_id":"<uuid>"}\')')
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string; meta?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
+    let metadata: Record<string, unknown> | undefined;
+    if (opts.meta) {
+      try {
+        const parsed = JSON.parse(opts.meta);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          metadata = parsed as Record<string, unknown>;
+        } else {
+          console.error('--meta must be a JSON object');
+          process.exit(1);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`--meta is not valid JSON: ${msg}`);
+        process.exit(1);
+      }
+    }
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
       assignee: opts.assignee,
@@ -161,6 +178,7 @@ busCommand
       needsApproval: opts.needsApproval ?? false,
       blockedBy: parseList(opts.blockedBy),
       blocks: parseList(opts.blocks),
+      metadata,
     });
     console.log(taskId);
     // Auto-notify assignee so the task is visible immediately (issue #78)
