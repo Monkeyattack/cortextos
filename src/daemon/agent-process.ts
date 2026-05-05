@@ -7,6 +7,7 @@ import { HermesPTY, hermesDbExists } from '../pty/hermes-pty.js';
 import { MessageDedup, injectMessage } from '../pty/inject.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
+import { detectRateLimitInLog, RATE_LIMIT_RETRY_MS } from '../utils/rate-limit-detect.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { readCronState, parseDurationMs, cronExpressionMinIntervalMs } from '../bus/cron-state.js';
 import { resolvePaths } from '../utils/paths.js';
@@ -375,6 +376,28 @@ export class AgentProcess {
     // awaiting. Either flag short-circuits crash recovery.
     if (this.stopRequested || this.stopping) {
       this.stopRequested = false;
+      return;
+    }
+
+    // Anthropic rate-limit detection. If the agent's stdout tail shows a
+    // rate-limit signature (5h / weekly / overloaded / "used N% of your..."),
+    // do NOT count this as a crash — the agent didn't fail, the API quota
+    // closed. Counting these against maxCrashesPerDay halts agents during
+    // rate-limit storms; using exponential 5s/10s/20s/.../5min backoff slams
+    // the API while it's already over budget. Use the long retry window
+    // (60min) so we poll once per hour for the quota window to reopen.
+    // hook-crash-alert.ts uses the same detector to suppress the 🚨 alert.
+    const stdoutLogPath = join(this.env.ctxRoot, 'logs', this.name, 'stdout.log');
+    if (detectRateLimitInLog(stdoutLogPath)) {
+      this.log(`Rate-limit detected in stdout — pausing for ${RATE_LIMIT_RETRY_MS / 60000}min before retry (NOT counted as crash)`);
+      this.appendCrashToRestartsLog(exitCode, RATE_LIMIT_RETRY_MS, 'RATE-LIMITED');
+      this.status = 'crashed';
+      this.notifyStatusChange();
+      setTimeout(() => {
+        if (this.status === 'crashed') {
+          this.start().catch(err => this.log(`Rate-limit retry failed: ${err}`));
+        }
+      }, RATE_LIMIT_RETRY_MS);
       return;
     }
 
