@@ -807,6 +807,16 @@ export class AgentProcess {
         if (gapMs > threshold) {
           const gapMin = Math.round(gapMs / 60_000);
           const expectedMin = Math.round(intervalMs / 60_000);
+
+          // max_age_minutes: if the cron has a time window (e.g. a pre-market
+          // check at 09:20 ET), suppress the nudge once the window has passed.
+          // A late nudge would cause the agent to fire the cron hours after it
+          // was useful, producing stale alerts or wasted API calls.
+          if (cronDef.max_age_minutes && gapMin > cronDef.max_age_minutes) {
+            this.log(`Gap nudge suppressed: "${cronDef.name}" past max_age_minutes (${gapMin}min > ${cronDef.max_age_minutes}min)`);
+            continue;
+          }
+
           const restoreHint = cronDef.interval
             ? `If missing, restore it from config.json: /loop ${cronDef.interval} <cron prompt>.`
             : `If missing, restore it from config.json using the cron expression in your config.`;

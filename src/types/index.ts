@@ -208,6 +208,14 @@ export interface CronEntry {
   /** "recurring" (default) restores on every session start.
    *  "once" restores only if fire_at is still in the future; deleted after firing. */
   type?: 'recurring' | 'once' | 'disabled';
+  /**
+   * Maximum age in minutes before a gap-nudge is suppressed.
+   * Use for time-windowed crons (e.g. a pre-market check at 09:20 ET): if the
+   * daemon detects a gap but the cron's window has already passed, injecting a
+   * nudge would cause a late stale fire. Set max_age_minutes to the number of
+   * minutes after the scheduled time beyond which the cron is no longer useful.
+   */
+  max_age_minutes?: number;
 }
 
 export interface OrgContext {
