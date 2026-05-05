@@ -311,6 +311,16 @@ export class AgentPTY {
       }
     }
 
+    // Ensure ~/.local/bin is on PATH so per-user installs (rtk, hyperframes,
+    // higgsfield, etc.) resolve in agent shells. Without this, every Bash hook
+    // logs 'rtk: not found' noise that masks real errors.
+    if (env['HOME'] && env['PATH']) {
+      const userBin = `${env['HOME']}/.local/bin`;
+      if (!env['PATH'].split(':').includes(userBin)) {
+        env['PATH'] = `${userBin}:${env['PATH']}`;
+      }
+    }
+
     // Windows: ensure UTF-8 locale so emoji and Unicode pass through the PTY
     if (platform() === 'win32') {
       if (!env['LANG']) env['LANG'] = 'en_US.UTF-8';
