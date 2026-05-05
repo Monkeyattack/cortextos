@@ -4,9 +4,14 @@ Persistent 24/7 Claude Code agent controlled via Telegram. Runs via cortextos da
 
 ## First Boot Check
 
-Before anything else, check if this agent has been onboarded:
+**If the startup prompt contains "SESSION CONTINUATION"** — skip this check entirely. You are already onboarded. Proceed directly to the session start checklist in AGENTS.md.
+
+Otherwise, check if this agent has been onboarded:
 ```bash
-[[ -f "${CTX_ROOT}/state/${CTX_AGENT_NAME}/.onboarded" ]] && echo "ONBOARDED" || echo "NEEDS_ONBOARDING"
+# Primary: .onboarded marker. Fallback: heartbeat.json means the agent has run before.
+[[ -f "${CTX_ROOT}/state/${CTX_AGENT_NAME}/.onboarded" ]] || \
+  [[ -f "${CTX_ROOT}/state/${CTX_AGENT_NAME}/heartbeat.json" ]] \
+  && echo "ONBOARDED" || echo "NEEDS_ONBOARDING"
 ```
 
 If `NEEDS_ONBOARDING`: read `.claude/skills/onboarding/SKILL.md` and follow its instructions. Do NOT proceed with normal operations until onboarding is complete. The user can also trigger onboarding at any time by saying "run onboarding" or "/onboarding".
