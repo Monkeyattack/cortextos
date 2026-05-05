@@ -13,6 +13,7 @@ import { createExperiment, runExperiment, evaluateExperiment, listExperiments, g
 import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
 import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
+import { createDecision, listDecisions } from '../bus/decision.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { updateCronFire } from '../bus/cron-state.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
@@ -1079,6 +1080,84 @@ busCommand
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     updateApproval(paths, id, status as ApprovalStatus, note);
     console.log(`Approval ${id} -> ${status}`);
+  });
+
+// ---------------------------------------------------------------------------
+// Decision commands — single tappable Telegram message per decision
+// (YES/NO/HOLD or custom). Replaces wall-of-text "decisions queue" pattern.
+// Callbacks resolve via fast-checker (decision_<id>_<optionIndex> prefix).
+// ---------------------------------------------------------------------------
+
+busCommand
+  .command('send-decision')
+  .description('Send a tappable decision request to a Telegram chat')
+  .argument('<chat-id>', 'Telegram chat ID')
+  .argument('<title>', 'Short decision title (one line)')
+  .argument('<context>', 'Context / details for the decision')
+  .option('--options <csv>', 'Comma-separated options', 'YES,NO,HOLD')
+  .option('--agent <name>', 'Requesting agent name (defaults to CTX_AGENT_NAME)')
+  .action(async (chatId: string, title: string, context: string, opts: { options?: string; agent?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const options = (opts.options || 'YES,NO,HOLD')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (options.length === 0) {
+      console.error('Error: --options must contain at least one option');
+      process.exit(1);
+    }
+    const agent = opts.agent || env.agentName || 'unknown';
+    try {
+      const { id, message_id } = await createDecision(paths, {
+        title,
+        context,
+        options,
+        chat_id: chatId,
+        agent,
+        agentDir: env.agentDir,
+      });
+      console.log(`id=${id} message_id=${message_id}`);
+    } catch (err: any) {
+      console.error(`Failed to send decision: ${err.message || err}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('list-decisions')
+  .description('List decision requests')
+  .option('--status <s>', 'Filter: pending or resolved')
+  .option('--limit <n>', 'Max rows to show', '20')
+  .action((opts: { status?: string; limit?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const status = opts.status as 'pending' | 'resolved' | undefined;
+    if (status && status !== 'pending' && status !== 'resolved') {
+      console.error("Invalid --status: must be 'pending' or 'resolved'");
+      process.exit(1);
+    }
+    const limit = parseInt(opts.limit || '20', 10);
+    const rows = listDecisions(paths, status).slice(0, limit);
+    if (rows.length === 0) {
+      console.log('(no decisions)');
+      return;
+    }
+    const now = Date.now();
+    console.log(['ID', 'AGE', 'STATUS', 'CHOSEN', 'TITLE'].join('\t'));
+    for (const d of rows) {
+      const ageSec = Math.max(0, Math.floor((now - new Date(d.created_at).getTime()) / 1000));
+      const age = ageSec < 60
+        ? `${ageSec}s`
+        : ageSec < 3600
+          ? `${Math.floor(ageSec / 60)}m`
+          : ageSec < 86400
+            ? `${Math.floor(ageSec / 3600)}h`
+            : `${Math.floor(ageSec / 86400)}d`;
+      const chosen = d.chosen ?? '-';
+      const titleShort = d.title.length > 60 ? d.title.slice(0, 57) + '...' : d.title;
+      console.log([d.id, age, d.status, chosen, titleShort].join('\t'));
+    }
   });
 
 // ---------------------------------------------------------------------------
