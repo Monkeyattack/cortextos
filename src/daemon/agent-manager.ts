@@ -227,6 +227,8 @@ export class AgentManager {
       // whitelists their numeric user ID.
       if (botToken && !allowedUserId) {
         log(`SECURITY: BOT_TOKEN is set but ALLOWED_USER is missing. Refusing to enable Telegram. Set ALLOWED_USER to your numeric Telegram user ID in .env, or remove BOT_TOKEN to start the agent without Telegram.`);
+        // Also warn at daemon level so the operator sees it in PM2 logs even if not tailing per-agent logs.
+        console.warn(`[daemon] WARN: ${name} has BOT_TOKEN but no ALLOWED_USER — Telegram blocked. Add ALLOWED_USER=<numeric_id> to agents/${name}/.env and restart.`);
         botToken = undefined;
       }
 
