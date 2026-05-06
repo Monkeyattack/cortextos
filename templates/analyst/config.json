@@ -43,6 +43,12 @@
       "type": "recurring",
       "interval": "7d",
       "prompt": "Read .claude/skills/catalog-browse/SKILL.md and execute the catalog browse workflow. Check for new community skills and recommend useful ones."
+    },
+    {
+      "name": "heartbeat-stamp",
+      "type": "recurring",
+      "interval": "1h",
+      "prompt": "cortextos bus update-heartbeat \"auto-stamp — active session\" && cortextos bus update-cron-fire heartbeat-stamp --interval 1h 2>/dev/null || true"
     }
   ],
   "ecosystem": {

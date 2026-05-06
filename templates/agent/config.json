@@ -12,6 +12,12 @@
       "type": "recurring",
       "interval": "4h",
       "prompt": "Read HEARTBEAT.md and follow its instructions. Update your heartbeat, check inbox, and work on your highest priority task."
+    },
+    {
+      "name": "heartbeat-stamp",
+      "type": "recurring",
+      "interval": "1h",
+      "prompt": "cortextos bus update-heartbeat \"auto-stamp — active session\" && cortextos bus update-cron-fire heartbeat-stamp --interval 1h 2>/dev/null || true"
     }
   ],
   "ecosystem": {
