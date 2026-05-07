@@ -216,6 +216,13 @@ export interface CronEntry {
    * minutes after the scheduled time beyond which the cron is no longer useful.
    */
   max_age_minutes?: number;
+  /**
+   * Who manages this cron's scheduling.
+   * "daemon" (default) — the daemon schedules and tracks fires in cron-state.json.
+   * "harness" — the Claude Code harness (CronCreate) manages firing; no cron-state.json
+   *   entry is written, so gap-detection must skip these or it will nudge indefinitely.
+   */
+  scheduled_by?: 'daemon' | 'harness';
 }
 
 export interface OrgContext {

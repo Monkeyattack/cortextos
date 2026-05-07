@@ -765,7 +765,7 @@ export class AgentProcess {
   }
 
   private async runGapDetectionLoop(
-    crons: Array<{ name: string; interval?: string; cron?: string }>,
+    crons: Array<{ name: string; interval?: string; cron?: string; max_age_minutes?: number; scheduled_by?: 'daemon' | 'harness' }>,
     generation: number,
     loopStartedAt: number,
   ): Promise<void> {
@@ -784,6 +784,10 @@ export class AgentProcess {
       const state = readCronState(stateDir);
 
       for (const cronDef of crons) {
+        // Harness-managed crons (CronCreate) never write to cron-state.json —
+        // gap-detection cannot track them and would nudge indefinitely.
+        if (cronDef.scheduled_by === 'harness') continue;
+
         const intervalMs = cronDef.interval
           ? parseDurationMs(cronDef.interval)
           : cronExpressionMinIntervalMs(cronDef.cron!);
