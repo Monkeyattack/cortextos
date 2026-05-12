@@ -711,7 +711,7 @@ export class TelegramAPI {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(Number(process.env.TELEGRAM_TIMEOUT_MS ?? 30000)),
       });
       const result = await response.json() as any;
       if (!result.ok) {
@@ -723,10 +723,9 @@ export class TelegramAPI {
         throw err;
       }
       // AbortSignal.timeout surfaces as DOMException name=TimeoutError (or AbortError).
-      // Surface as a clean retryable error so the poller loop recovers next tick
-      // instead of silently hanging on a wedged TCP connection.
+      const timeoutMs = Number(process.env.TELEGRAM_TIMEOUT_MS ?? 30000);
       if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-        throw new Error(`Telegram API request timed out after 15s: ${method}`);
+        throw new Error(`Telegram API request timed out after ${timeoutMs / 1000}s: ${method}`);
       }
       throw new Error(`Telegram API request failed: ${err}`);
     }
