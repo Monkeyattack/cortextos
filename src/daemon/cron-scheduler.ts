@@ -413,6 +413,26 @@ export class CronScheduler {
           `[cron-scheduler] catch-up: cron "${def.name}" missed fire at ${new Date(nextFireAt).toISOString()} — scheduling immediate fire`
         );
         nextFireAt = now; // fire on the very next tick
+
+        // Pre-claim the catch-up slot: write last_fire_attempted_at to disk NOW
+        // so that any reload triggered between loadCrons and the next tick (e.g.
+        // a config-watch reload) uses this timestamp as referenceMs and does not
+        // schedule a second catch-up for the same window. Without this, batch
+        // catch-up fires (multiple crons due simultaneously on restart) are
+        // vulnerable to a race: reload arrives mid-batch, sees unclaimed crons,
+        // and re-schedules them — producing double-fires for slow-schedule crons
+        // like daily tasks. (Observed: theta-wave 0 4 * * * fired at 05:02 UTC
+        // catch-up then again at 09:00 UTC after analyst agent restart.)
+        const claimIso = new Date(now).toISOString();
+        try {
+          updateCron(this.agentName, def.name, { last_fire_attempted_at: claimIso });
+        } catch (err) {
+          this.logger(
+            `[cron-scheduler] WARNING: failed to pre-claim catch-up slot for "${def.name}" — ` +
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            `A reload between loadCrons and tick could double-fire this cron.`
+          );
+        }
       }
 
       nextScheduled.set(def.name, { definition: def, nextFireAt, changeKey: key });
