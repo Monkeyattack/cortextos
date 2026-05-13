@@ -743,6 +743,7 @@ busCommand
         'other',
         `Experiment ID: ${id}\nMetric: ${metric}\nHypothesis: ${hypothesis}`,
         env.frameworkRoot,
+        env.agentDir,
       );
       console.log(`approval_required: ${approvalId}`);
     }
@@ -977,6 +978,10 @@ busCommand
   .option('--file <path>', 'Send a document/file with caption (any file type)')
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
   .action(async (chatId: string, message: string, opts: { image?: string; file?: string; plainText?: boolean }) => {
+    // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
+    // does not expand escapes, so they arrive at argv as 2-char literals and
+    // Telegram renders them as visible text. Normalize before send + log.
+    message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
     let botToken = '';
@@ -1062,7 +1067,7 @@ busCommand
     // orgDir resolves to where activity-channel.env actually lives (the
     // framework repo path, NOT the runtime state path — see
     // src/bus/approval.ts:postApprovalToActivityChannel for the history).
-    const id = await createApproval(paths, env.agentName, env.org, title, category as ApprovalCategory, context || '', env.frameworkRoot);
+    const id = await createApproval(paths, env.agentName, env.org, title, category as ApprovalCategory, context || '', env.frameworkRoot, env.agentDir);
     console.log(id);
   });
 
@@ -1732,6 +1737,8 @@ busCommand
   .argument('<reply>', 'Reply text')
   .argument('[msg-id]', 'Inbox message ID to ACK')
   .action((agent: string, reply: string, msgId?: string) => {
+    // Same literal '\n'/'\t' normalize as send-telegram (codex agent fix).
+    reply = reply.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     const { mkdirSync, appendFileSync } = require('fs');
     const { join } = require('path');
     const env = resolveEnv();
