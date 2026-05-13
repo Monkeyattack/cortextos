@@ -9,7 +9,6 @@ import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { detectRateLimitInLog, RATE_LIMIT_RETRY_MS } from '../utils/rate-limit-detect.js';
 import { getOverdueReminders } from '../bus/reminders.js';
-import { readCronState, parseDurationMs, cronExpressionMinIntervalMs } from '../bus/cron-state.js';
 import { resolvePaths } from '../utils/paths.js';
 
 type LogFn = (msg: string) => void;
@@ -45,9 +44,6 @@ export class AgentProcess {
   // from an old PTY can race past stopRequested and trigger crash recovery on
   // the new agent.
   private lifecycleGeneration: number = 0;
-  // Guard: only one cron verification waiter in-flight per agent at a time.
-  // Rapid --continue restarts must not stack duplicate waiters. (Issue #182)
-  private cronVerificationPending: boolean = false;
   // BUG-011 fix: stop() awaits this promise (resolved by the onExit handler in start())
   // to guarantee the PTY exit has fired before stopping=false is reset. Without
   // this, the exit handler can fire after stopping=false and trigger spurious
@@ -500,19 +496,19 @@ export class AgentProcess {
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
     const handoffUxOverride = isHandoffRestart
-      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc. CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state. Do this BEFORE restoring crons, BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
+      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc. CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
     const onlineMessage = isHandoffRestart
       ? ''
-      : ' After setting up crons, send a Telegram message to the user saying you are back online.';
-    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. Then restore your crons from config.json: CRITICAL DEDUP: Always call CronList BEFORE creating any cron. For each config.json entry, search the CronList output for its prompt text — if the prompt already appears, SKIP that cron entirely. For entries NOT already listed: for each entry with type "recurring" (or no type field), call CronCreate directly (do NOT use /loop — /loop will prompt the user about cloud scheduling which blocks boot in autonomous mode). Convert the interval to a cron expression: 1h→"0 */1 * * *", 2h→"0 */2 * * *", 4h→"0 */4 * * *", 6h→"0 */6 * * *", 12h→"0 */12 * * *", 24h→"0 0 * * *", Nm→"*/N * * * *". Pass recurring:true. For entries with type "once": compare fire_at against the current UTC time — if fire_at is in the future call CronCreate (one-shot, no recurring flag), if in the past delete that entry from config.json.${reminderBlock}${deliverablesBlock}${handoffBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
+      : ' Send a Telegram message to the user saying you are back online.';
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${handoffBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
   private buildContinuePrompt(): string {
     const nowUtc = new Date().toISOString();
     const reminderBlock = this.buildReminderBlock();
     const deliverablesBlock = this.buildDeliverablesBlock();
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Restore your crons from config.json ONLY if missing. CRITICAL DEDUP: Call CronList FIRST. For each config.json entry, search the CronList output for its prompt text — if the prompt already appears, SKIP that cron. For entries NOT already listed: use CronCreate directly (do NOT use /loop — /loop will prompt about cloud scheduling which blocks autonomous boot). Convert interval to cron expression: 1h→"0 */1 * * *", 6h→"0 */6 * * *", 24h→"0 0 * * *", Nm→"*/N * * * *". Pass recurring:true for recurring entries, no recurring flag for once entries (only if fire_at is in the future). Rapid --continue restarts must not accumulate duplicates.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations. After restoring crons and checking inbox, send a Telegram message to the user saying you are back online.`;
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations. After checking inbox, send a Telegram message to the user saying you are back online.`;
   }
 
   /**
@@ -577,6 +573,11 @@ export class AgentProcess {
 
   private startSessionTimer(): void {
     const DEFAULT_MAX_SESSION_S = 255600;
+    // Node setTimeout uses int32 ms internally. Values > 2^31-1 (~24.8d) silently
+    // coerce to 1ms, which combined with the BUG-048 reschedule loop below causes
+    // an infinite tight loop. Clamp at the call site so any future misconfigured
+    // max_session_seconds (e.g. a stray 3600000s = 1000h) cannot wedge the daemon.
+    const MAX_SETTIMEOUT_MS = 2_147_483_647;
     const startedAt = Date.now();
     const initialMs = (this.config.max_session_seconds || DEFAULT_MAX_SESSION_S) * 1000;
 
@@ -608,7 +609,7 @@ export class AgentProcess {
 
         this.log(`Session timer fired after ${Math.round(elapsedMs / 1000)}s (limit: ${currentMaxMs / 1000}s)`);
         this.sessionRefresh().catch(err => this.log(`Session refresh failed: ${err}`));
-      }, delayMs);
+      }, Math.min(delayMs, MAX_SETTIMEOUT_MS));
     };
 
     scheduleCheck(initialMs);
@@ -693,20 +694,6 @@ export class AgentProcess {
       this.onStatusChange(this.getStatus());
     }
   }
-
-  /**
-   * Schedule a background cron verification check.
-   *
-   * Waits for the agent to finish its startup sequence (detected via the
-   * last_idle.flag written by the Stop hook after the agent's first turn
-   * completes), then injects a lightweight prompt asking the agent to
-   * verify its crons match config.json and restore any that are missing.
-   *
-   * Safe for both fresh starts and --continue restarts: the idle-wait
-   * ensures we never inject mid-conversation.
-   *
-   * Fire-and-forget: errors are logged but never propagated.
-   */
   scheduleCronVerification(): void {
     // Hermes owns its cron scheduler natively — no CronList / /loop needed.
     // Verification via injected prompts would interfere with Hermes's own cron system.
