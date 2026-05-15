@@ -309,8 +309,46 @@ export const addAgentCommand = new Command('add-agent')
     }
 
     console.log(`\n  Agent "${name}" created.`);
+
+    // Audit existing agents for duplicate BOT_TOKENs and warn loudly.
+    const orgsRoot = join(projectRoot, 'orgs');
+    if (existsSync(orgsRoot)) {
+      const duplicates: string[] = [];
+      try {
+        const orgs = readdirSync(orgsRoot, { withFileTypes: true }).filter(d => d.isDirectory());
+        const tokenMap: Record<string, string> = {};
+        for (const orgDir of orgs) {
+          const agentsRoot = join(orgsRoot, orgDir.name, 'agents');
+          if (!existsSync(agentsRoot)) continue;
+          const agents = readdirSync(agentsRoot, { withFileTypes: true }).filter(d => d.isDirectory());
+          for (const a of agents) {
+            const envFile = join(agentsRoot, a.name, '.env');
+            if (!existsSync(envFile)) continue;
+            try {
+              const content = readFileSync(envFile, 'utf-8');
+              const match = content.match(/^BOT_TOKEN=(.+)$/m);
+              const token = match?.[1]?.trim();
+              if (token && /^\d+:[A-Za-z0-9_-]+$/.test(token)) {
+                if (tokenMap[token]) {
+                  duplicates.push(`  ⚠️  ${tokenMap[token]} and ${a.name} share the same BOT_TOKEN`);
+                } else {
+                  tokenMap[token] = a.name;
+                }
+              }
+            } catch { /* skip */ }
+          }
+        }
+      } catch { /* non-fatal */ }
+      if (duplicates.length > 0) {
+        console.warn(`\n  WARNING: Duplicate BOT_TOKENs detected — agents sharing a token are indistinguishable in Telegram:`);
+        for (const d of duplicates) console.warn(d);
+        console.warn(`  Each agent needs its own unique bot from @BotFather.\n`);
+      }
+    }
+
     console.log(`\n  Next steps:`);
     console.log(`    1. Edit ${join('orgs', org, 'agents', name, '.env')} with your Telegram settings`);
+    console.log(`    ⚠️  IMPORTANT: Each agent needs a UNIQUE bot token from @BotFather — never reuse another agent's token`);
     console.log(`    2. Customize identity files (IDENTITY.md, SOUL.md, GOALS.md)`);
     console.log(`    3. Start: cortextos start ${name}\n`);
   });

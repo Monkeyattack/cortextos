@@ -220,6 +220,40 @@ export class AgentManager {
         botToken = undefined;
       }
 
+      // Validate BOT_TOKEN uniqueness across all agents. Shared tokens cause
+      // Telegram identity confusion — messages from different agents look identical.
+      if (botToken) {
+        const orgsRoot = join(this.frameworkRoot, 'orgs');
+        if (existsSync(orgsRoot)) {
+          try {
+            const orgs = readdirSync(orgsRoot, { withFileTypes: true }).filter(d => d.isDirectory());
+            for (const org of orgs) {
+              const agentsRoot = join(orgsRoot, org.name, 'agents');
+              if (!existsSync(agentsRoot)) continue;
+              const peers = readdirSync(agentsRoot, { withFileTypes: true })
+                .filter(d => d.isDirectory() && d.name !== name);
+              for (const peer of peers) {
+                const peerEnv = join(agentsRoot, peer.name, '.env');
+                if (!existsSync(peerEnv)) continue;
+                try {
+                  const peerContent = readFileSync(peerEnv, 'utf-8');
+                  const peerMatch = peerContent.match(/^BOT_TOKEN=(.+)$/m);
+                  const peerToken = peerMatch?.[1]?.trim();
+                  if (peerToken && peerToken === botToken) {
+                    const msg = `DUPLICATE BOT_TOKEN: ${name} shares its Telegram bot token with agent '${peer.name}'. ` +
+                      `Messages from both agents will appear identical in Telegram. ` +
+                      `Fix: create a new bot via @BotFather and update agents/${name}/.env BOT_TOKEN.`;
+                    log(msg);
+                    console.error(`[daemon] CRITICAL: ${msg}`);
+                    botToken = undefined;
+                  }
+                } catch { /* skip unreadable peer */ }
+              }
+            }
+          } catch { /* non-fatal: best-effort check */ }
+        }
+      }
+
       // ALLOWED_USER must be a numeric Telegram user ID, not a username
       if (allowedUserId && !/^\d+$/.test(allowedUserId)) {
         log(`SECURITY: ALLOWED_USER is not a numeric ID. Telegram user IDs are numbers (e.g. 123456789). Refusing to enable Telegram. Fix the .env file.`);
