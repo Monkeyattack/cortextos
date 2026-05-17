@@ -61,6 +61,7 @@ export interface ExperimentContext {
   results_tsv: string;
   identity: string;
   goals: string;
+  cycles: ExperimentCycle[];
 }
 
 export interface ExperimentCycle {
@@ -431,6 +432,10 @@ export function gatherContext(
   const goalsPath = join(agentDir, 'GOALS.md');
   const goals = existsSync(goalsPath) ? readFileSync(goalsPath, 'utf-8') : '';
 
+  // Read cycles from per-agent local experiments/config.json
+  const config = loadExperimentConfig(agentDir);
+  const cycles = config.cycles ?? [];
+
   return {
     agent: agentName,
     total_experiments: total,
@@ -441,6 +446,7 @@ export function gatherContext(
     results_tsv: resultsTsv,
     identity,
     goals,
+    cycles,
   };
 }
 
