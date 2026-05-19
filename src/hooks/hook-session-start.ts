@@ -15,14 +15,30 @@
  * that agents sometimes skipped, leaving them appearing offline or
  * losing context across restarts.
  */
-import { appendFileSync, mkdirSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 
 async function main(): Promise<void> {
   const agentName = process.env.CTX_AGENT_NAME;
   const org = process.env.CTX_ORG || '';
   if (!agentName) return;
+
+  // 0. Onboarding guard — inject SESSION CONTINUATION if agent is already onboarded.
+  //    Moves onboarding detection from model judgment (unreliable for Haiku) to the
+  //    hook level. The stdout text appears as a system-reminder before any skill loads,
+  //    so the model never reaches the onboarding decision path.
+  try {
+    const instanceId = process.env.CTX_INSTANCE_ID || 'default';
+    const ctxRoot = join(homedir(), '.cortextos', instanceId);
+    const onboardedMarker = join(ctxRoot, 'state', agentName, '.onboarded');
+    if (existsSync(onboardedMarker)) {
+      process.stdout.write(
+        'SESSION CONTINUATION: Agent already onboarded. Skip onboarding check, proceed to AGENTS.md.\n'
+      );
+    }
+  } catch { /* non-fatal — fall through to prompt-level check */ }
 
   // 1. Heartbeat update
   try {

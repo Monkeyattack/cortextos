@@ -13,6 +13,7 @@ export default defineConfig({
     'hooks/hook-idle-flag': 'src/hooks/hook-idle-flag.ts',
     'hooks/hook-scrape-usage': 'src/hooks/hook-scrape-usage.ts',
     'hooks/hook-context-status': 'src/hooks/hook-context-status.ts',
+    'hooks/hook-session-start': 'src/hooks/hook-session-start.ts',
   },
   format: ['cjs'],
   target: 'node20',

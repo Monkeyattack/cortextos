@@ -300,6 +300,13 @@ export class AgentProcess {
    */
   async sessionRefresh(): Promise<void> {
     this.log('Session refresh (--continue restart)');
+    // Write .session-refresh marker BEFORE stop() so the SessionEnd crash-alert
+    // hook can distinguish a scheduled 71h refresh from an unexpected crash.
+    // Without this marker the hook defaults to end_type='crash' and alerts health/chief.
+    try {
+      const stateDir = join(this.env.ctxRoot, 'state', this.name);
+      writeFileSync(join(stateDir, '.session-refresh'), new Date().toISOString(), 'utf-8');
+    } catch { /* non-fatal — worst case: crash-alert fires as before */ }
     await this.stop();
     await this.start();
     this.log('Session refreshed');
