@@ -25,7 +25,21 @@ async function main(): Promise<void> {
   const org = process.env.CTX_ORG || '';
   if (!agentName) return;
 
-  // 0. Onboarding guard — inject SESSION CONTINUATION if agent is already onboarded.
+  // 0a. Maintenance mode guard — if a .maintenance marker exists at the instance root,
+  //     suppress Telegram back-online notifications fleet-wide. Devops writes this
+  //     marker before planned daemon restarts to prevent notification floods.
+  try {
+    const instanceId = process.env.CTX_INSTANCE_ID || 'default';
+    const ctxRoot = join(homedir(), '.cortextos', instanceId);
+    const maintenanceMarker = join(ctxRoot, '.maintenance');
+    if (existsSync(maintenanceMarker)) {
+      process.stdout.write(
+        'MAINTENANCE MODE: Planned maintenance in progress. Suppress all Telegram back-online/boot notifications this session. Do not send boot or online messages to Telegram.\n'
+      );
+    }
+  } catch { /* non-fatal */ }
+
+  // 0b. Onboarding guard — inject SESSION CONTINUATION if agent is already onboarded.
   //    Moves onboarding detection from model judgment (unreliable for Haiku) to the
   //    hook level. The stdout text appears as a system-reminder before any skill loads,
   //    so the model never reaches the onboarding decision path.
