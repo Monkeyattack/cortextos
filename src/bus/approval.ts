@@ -285,7 +285,10 @@ export function listPendingApprovals(paths: BusPaths): Approval[] {
   for (const file of files) {
     try {
       const content = readFileSync(join(pendingDir, file), 'utf-8');
-      approvals.push(JSON.parse(content));
+      const approval: Approval = JSON.parse(content);
+      // Guard: skip files left in pending/ that were resolved without calling update-approval
+      if (approval.status !== 'pending' && approval.status !== undefined) continue;
+      approvals.push(approval);
     } catch {
       // Skip corrupt
     }

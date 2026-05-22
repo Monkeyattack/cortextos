@@ -219,7 +219,14 @@ export function collectMetrics(ctxRoot: string, org?: string): MetricsReport {
   for (const apDir of approvalPaths) {
     if (existsSync(apDir)) {
       try {
-        approvalsPending += readdirSync(apDir).filter(f => f.endsWith('.json')).length;
+        approvalsPending += readdirSync(apDir)
+          .filter(f => f.endsWith('.json'))
+          .filter(f => {
+            try {
+              const data = JSON.parse(require('fs').readFileSync(require('path').join(apDir, f), 'utf-8'));
+              return data.status === 'pending' || data.status === undefined;
+            } catch { return true; }
+          }).length;
       } catch { /* ignore */ }
     }
   }
