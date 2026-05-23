@@ -62,6 +62,11 @@ export interface ExperimentContext {
   identity: string;
   goals: string;
   cycles: ExperimentCycle[];
+  /** All experiments (running first, then recent completed), sourced directly
+   *  from history files. Populated regardless of whether manage-cycle was
+   *  used, so agents using create-experiment directly are visible here even
+   *  when cycles[] is empty. */
+  experiments: Experiment[];
 }
 
 export interface ExperimentCycle {
@@ -436,6 +441,13 @@ export function gatherContext(
   const config = loadExperimentConfig(agentDir);
   const cycles = config.cycles ?? [];
 
+  // Include experiments directly from history so agents using create-experiment
+  // (without manage-cycle) are visible to analysts. Running experiments first,
+  // then most-recent completed, capped at 20 total to keep context lean.
+  const running = all.filter(e => e.status === 'running' || e.status === 'proposed');
+  const recentCompleted = completed.slice(0, Math.max(0, 20 - running.length));
+  const experiments = [...running, ...recentCompleted];
+
   return {
     agent: agentName,
     total_experiments: total,
@@ -447,6 +459,7 @@ export function gatherContext(
     identity,
     goals,
     cycles,
+    experiments,
   };
 }
 
