@@ -63,6 +63,29 @@ function checkDeliverableRequirement(taskId: string, frameworkRoot: string, org:
   return null;
 }
 
+/**
+ * Resolve an agent directory by name, searching the current org first then
+ * all other orgs. Fixes cross-org gather-context/list-experiments: analyst
+ * (prop-firm-admin) calling --agent lit_agent (creative-studio) used to
+ * return empty experiments[] because it looked in the wrong org.
+ */
+function resolveAgentDir(frameworkRoot: string, currentOrg: string, agentName: string): string {
+  const primary = join(frameworkRoot, 'orgs', currentOrg, 'agents', agentName);
+  if (existsSync(primary)) return primary;
+  const orgsDir = join(frameworkRoot, 'orgs');
+  if (existsSync(orgsDir)) {
+    try {
+      const { readdirSync } = require('fs');
+      for (const org of readdirSync(orgsDir) as string[]) {
+        if (org === currentOrg) continue;
+        const candidate = join(orgsDir, org, 'agents', agentName);
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch { /* fall through to primary */ }
+  }
+  return primary;
+}
+
 export const busCommand = new Command('bus')
   .description('Bus commands for agent messaging, tasks, and events');
 
@@ -794,7 +817,7 @@ busCommand
   .action((opts: { agent?: string; status?: string; metric?: string; json?: boolean }) => {
     const env = resolveEnv();
     const agentDir = opts.agent && env.frameworkRoot
-      ? join(env.frameworkRoot, 'orgs', env.org, 'agents', opts.agent)
+      ? resolveAgentDir(env.frameworkRoot, env.org, opts.agent)
       : (env.agentDir || process.cwd());
     const experiments = listExperiments(agentDir, {
       agent: opts.agent,
@@ -813,7 +836,7 @@ busCommand
     const env = resolveEnv();
     const agentName = opts.agent || env.agentName;
     const agentDir = opts.agent && env.frameworkRoot
-      ? join(env.frameworkRoot, 'orgs', env.org, 'agents', opts.agent)
+      ? resolveAgentDir(env.frameworkRoot, env.org, opts.agent)
       : (env.agentDir || process.cwd());
     const context = gatherContext(agentDir, agentName, { format: opts.format as 'json' | 'markdown' });
     console.log(JSON.stringify(context, null, 2));
