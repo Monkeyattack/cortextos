@@ -71,12 +71,19 @@ export async function middleware(request: NextRequest) {
   // Security (H7): SSE endpoints require ?token=<jwt> auth — removed from public whitelist
   // /api/flip-signal and /api/orb-status are intentionally public: read-only signals for NT8 NinjaScript (no auth header possible)
   // /api/pa-account is intentionally public: read-only PA account metrics for NT8 MonkeyAttackMonitor
+  // /api/nt8/state-update, /api/nt8/pending-commands, /api/nt8/command-ack, /api/nt8/events (POST) are public:
+  //   inbound from VPS relay/watchdog which cannot send auth headers
+  // /api/nt8/state, /api/nt8/command, /api/nt8/stream: authenticated (dashboard users only)
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/flip-signal') ||
     pathname.startsWith('/api/orb-status') ||
     pathname.startsWith('/api/pa-account') ||
+    pathname.startsWith('/api/nt8/state-update') ||
+    pathname.startsWith('/api/nt8/pending-commands') ||
+    pathname.startsWith('/api/nt8/command-ack') ||
+    pathname.startsWith('/api/nt8/events') ||
     pathname.startsWith('/_next') ||
     pathname === '/favicon.ico'
   ) {
