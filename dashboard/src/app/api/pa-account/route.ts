@@ -4,6 +4,33 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+const STATE_PATH = path.join('/tmp', 'pa_account.json');
+
+function readState(): { updated_at: string | null; accounts: Record<string, unknown>[] } {
+  try {
+    if (!fs.existsSync(STATE_PATH)) return { updated_at: null, accounts: [] };
+    return JSON.parse(fs.readFileSync(STATE_PATH, 'utf-8'));
+  } catch {
+    return { updated_at: null, accounts: [] };
+  }
+}
+
+function computeStatus(
+  balance: number | null,
+  threshold: number | null,
+): { status: string; status_reason: string } {
+  if (balance === null || threshold === null) {
+    return { status: 'ACTIVE', status_reason: 'No live balance data — defaulting to ACTIVE' };
+  }
+  if (balance <= threshold) {
+    return { status: 'HALTED', status_reason: 'Balance at or below trailing drawdown threshold — halt trading' };
+  }
+  if (balance <= threshold * 1.1) {
+    return { status: 'AT_RISK', status_reason: 'Balance within 10% of trailing drawdown threshold' };
+  }
+  return { status: 'ACTIVE', status_reason: 'Within normal parameters' };
+}
+
 /**
  * GET /api/pa-account[?account_id=APEX-123]
  *
@@ -31,11 +58,72 @@ export const dynamic = 'force-dynamic';
  *   updated_at: string | null,
  * }
  */
+/**
+ * POST /api/pa-account
+ *
+ * NT8 NinjaScript pushes live equity/balance for an account.
+ * Server recomputes status from stored trailing_drawdown_threshold.
+ * Upserts account into state file — creates entry if not present (fail-open thresholds).
+ *
+ * Body: { account_id: string, balance: number, equity?: number, daily_pnl?: number }
+ */
+export async function POST(request: Request) {
+  let body: { account_id?: string; balance?: number; equity?: number; daily_pnl?: number };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const { account_id, balance, equity, daily_pnl } = body;
+  if (!account_id || typeof balance !== 'number') {
+    return NextResponse.json({ error: 'account_id and balance are required' }, { status: 400 });
+  }
+
+  const data = readState();
+  const updatedAt = new Date().toISOString();
+
+  const idx = data.accounts.findIndex((a) => (a as { account_id: string }).account_id === account_id);
+  const existing = idx >= 0 ? data.accounts[idx] : null;
+
+  const threshold = (existing as { trailing_drawdown_threshold?: number | null } | null)
+    ?.trailing_drawdown_threshold ?? null;
+  const { status, status_reason } = computeStatus(balance, threshold);
+
+  const updated = {
+    ...(existing ?? {}),
+    account_id,
+    balance,
+    equity: equity ?? null,
+    current_daily_pnl: daily_pnl ?? (existing as { current_daily_pnl?: unknown } | null)?.current_daily_pnl ?? null,
+    trailing_drawdown_threshold: threshold,
+    daily_drawdown_limit: (existing as { daily_drawdown_limit?: unknown } | null)?.daily_drawdown_limit ?? null,
+    peak_balance: (existing as { peak_balance?: unknown } | null)?.peak_balance ?? null,
+    status,
+    status_reason,
+  };
+
+  if (idx >= 0) {
+    data.accounts[idx] = updated;
+  } else {
+    data.accounts.push(updated);
+  }
+  data.updated_at = updatedAt;
+
+  try {
+    const tmp = STATE_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, STATE_PATH);
+  } catch (err) {
+    return NextResponse.json({ error: `State write failed: ${err}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ ...updated, updated_at: updatedAt });
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get('account_id') ?? null;
-
-  const statePath = path.join('/tmp', 'pa_account.json');
 
   const failOpen = {
     account_id: accountId,
@@ -50,32 +138,29 @@ export async function GET(request: Request) {
   };
 
   try {
-    if (!fs.existsSync(statePath)) {
+    const data = readState();
+
+    if (data.accounts.length === 0 && !data.updated_at) {
       return NextResponse.json(failOpen);
     }
 
-    const raw = fs.readFileSync(statePath, 'utf-8');
-    const data = JSON.parse(raw);
-
-    // If account_id filter provided, return matching account or fail-open
     if (accountId && data.accounts) {
-      const account = data.accounts.find((a: { account_id: string }) => a.account_id === accountId);
+      const account = data.accounts.find((a) => (a as { account_id: string }).account_id === accountId);
       if (!account) {
         return NextResponse.json({
           ...failOpen,
           status_reason: `Account ${accountId} not found in state file — defaulting to ACTIVE`,
-          updated_at: data.updated_at ?? null,
+          updated_at: data.updated_at,
         });
       }
       return NextResponse.json({ ...account, updated_at: data.updated_at });
     }
 
-    // No filter — return first account or top-level data
-    if (data.accounts && data.accounts.length > 0) {
+    if (data.accounts.length > 0) {
       return NextResponse.json({ ...data.accounts[0], updated_at: data.updated_at });
     }
 
-    return NextResponse.json({ ...data });
+    return NextResponse.json(failOpen);
   } catch (err) {
     return NextResponse.json({
       ...failOpen,
