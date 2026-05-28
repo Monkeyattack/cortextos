@@ -2898,6 +2898,65 @@ busCommand
     }
   });
 
+busCommand
+  .command('fetch-url')
+  .description('Fetch a URL and print the response body — lets agents make HTTP requests without needing curl')
+  .argument('<url>', 'URL to fetch')
+  .option('-X, --method <method>', 'HTTP method', 'GET')
+  .option('-H, --header <header...>', 'Request headers in "Key: Value" format')
+  .option('-d, --data <body>', 'Request body (string or JSON)')
+  .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
+  .option('--status-only', 'Print only the HTTP status code')
+  .option('--json', 'Parse and pretty-print JSON response')
+  .action(async (url: string, opts: { method: string; header?: string[]; data?: string; timeout: string; statusOnly?: boolean; json?: boolean }) => {
+    const headers: Record<string, string> = {};
+    for (const h of (opts.header ?? [])) {
+      const idx = h.indexOf(':');
+      if (idx !== -1) headers[h.slice(0, idx).trim()] = h.slice(idx + 1).trim();
+    }
+    if (opts.data && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), parseInt(opts.timeout, 10));
+
+    try {
+      const res = await fetch(url, {
+        method: opts.method.toUpperCase(),
+        headers,
+        body: opts.data ?? undefined,
+        signal: controller.signal,
+      } as RequestInit);
+
+      clearTimeout(timer);
+
+      if (opts.statusOnly) {
+        console.log(res.status);
+        return;
+      }
+
+      const text = await res.text();
+      if (opts.json) {
+        try {
+          console.log(JSON.stringify(JSON.parse(text), null, 2));
+        } catch {
+          console.log(text);
+        }
+      } else {
+        console.log(text);
+      }
+
+      if (!res.ok) process.exit(1);
+    } catch (err: any) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        console.error(`fetch-url: request timed out after ${opts.timeout}ms`);
+      } else {
+        console.error(`fetch-url: ${err.message ?? err}`);
+      }
+      process.exit(1);
+    }
+  });
+
 function sleepMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
