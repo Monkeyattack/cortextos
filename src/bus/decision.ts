@@ -33,6 +33,13 @@ export interface Decision {
   status: 'pending' | 'resolved';
   chosen?: string;
   resolved_at?: string;
+  /**
+   * True when the decision message was sent via the central Taskmaster bot
+   * (TASKMASTER_BOT_TOKEN) rather than the requesting agent's own BOT_TOKEN.
+   * The callback router uses this to answer/edit with the Taskmaster bot's
+   * TelegramAPI instead of the agent's own bot — they own different messages.
+   */
+  via_taskmaster?: boolean;
 }
 
 interface DecisionState {
@@ -124,6 +131,7 @@ export async function createDecision(
     agent: string;
     agentDir?: string;
     botToken?: string;
+    taskmasterBotToken?: string;
   },
 ): Promise<{ id: string; message_id: number }> {
   if (!args.options || args.options.length === 0) {
@@ -138,7 +146,11 @@ export async function createDecision(
   const text = `${args.title}\n\n${args.context}`;
   const keyboard = buildDecisionKeyboard(id, args.options);
 
-  const botToken = args.botToken ?? resolveBotToken(args.agentDir);
+  // When a Taskmaster bot token is supplied, all decisions route through the
+  // one central bot so they land in a single Telegram thread. via_taskmaster
+  // is recorded so the callback router answers with the matching bot.
+  const viaTaskmaster = Boolean(args.taskmasterBotToken && args.taskmasterBotToken.trim());
+  const botToken = (viaTaskmaster ? args.taskmasterBotToken : undefined) ?? args.botToken ?? resolveBotToken(args.agentDir);
   if (!botToken) {
     throw new Error('createDecision: BOT_TOKEN not configured (agent .env or process.env)');
   }
@@ -160,6 +172,7 @@ export async function createDecision(
     agent: args.agent,
     created_at: now,
     status: 'pending',
+    ...(viaTaskmaster ? { via_taskmaster: true } : {}),
   };
 
   const state = readState(paths);
