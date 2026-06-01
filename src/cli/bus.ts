@@ -1186,6 +1186,21 @@ busCommand
       process.exit(1);
     }
     const agent = opts.agent || env.agentName || 'unknown';
+    // If the org has TASKMASTER_BOT_TOKEN set in its secrets.env, route ALL
+    // decisions through the central Taskmaster bot so they land in one thread.
+    // The chat_id arg is still used as-is — only the bot delivering it changes.
+    let taskmasterBotToken: string | undefined;
+    if (env.org) {
+      const secretsPath = join(env.frameworkRoot, 'orgs', env.org, 'secrets.env');
+      try {
+        if (existsSync(secretsPath)) {
+          const match = readFileSync(secretsPath, 'utf-8').match(/^TASKMASTER_BOT_TOKEN=(.+)$/m);
+          if (match && match[1].trim()) taskmasterBotToken = match[1].trim();
+        }
+      } catch {
+        // secrets.env unreadable — fall back to the agent's own bot
+      }
+    }
     try {
       const { id, message_id } = await createDecision(paths, {
         title,
@@ -1194,6 +1209,7 @@ busCommand
         chat_id: chatId,
         agent,
         agentDir: env.agentDir,
+        taskmasterBotToken,
       });
       console.log(`id=${id} message_id=${message_id}`);
     } catch (err: any) {

@@ -539,12 +539,20 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   /**
    * Handle a Telegram inline button callback query.
    * Routes to permission, restart, or AskUserQuestion handlers.
+   *
+   * `overrideApi` lets a caller answer/edit with a different bot than the
+   * agent's own. The central Taskmaster poller (agent-manager) passes its
+   * TelegramAPI here so decision callbacks sent via the Taskmaster bot are
+   * answered by that same bot — answerCallbackQuery + editMessageText must
+   * target the bot that owns the message. When omitted, the agent's own bot
+   * (this.telegramApi) is used, preserving prior behavior.
    */
-  async handleCallback(query: TelegramCallbackQuery): Promise<void> {
+  async handleCallback(query: TelegramCallbackQuery, overrideApi?: TelegramAPI): Promise<void> {
     const data = stripControlChars(query.data || '');
     const chatId = query.message?.chat?.id;
     const messageId = query.message?.message_id;
     const callbackQueryId = query.id;
+    const api = overrideApi ?? this.telegramApi;
 
     // SECURITY: callbacks must come from the whitelisted user. Without this,
     // anyone who sees a button (forwarded message, group, etc.) could click it.
@@ -568,16 +576,16 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const optionIdx = parseInt(decisionMatch[2], 10);
       const existing = getDecision(this.paths, decisionId);
       if (!existing || existing.status === 'resolved') {
-        if (this.telegramApi) {
-          try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Already resolved'); } catch { /* ignore */ }
+        if (api) {
+          try { await api.answerCallbackQuery(callbackQueryId, 'Already resolved'); } catch { /* ignore */ }
         }
         this.log(`Decision callback: ${decisionId} not found or already resolved`);
         return;
       }
       const chosen = existing.options[optionIdx];
       if (chosen === undefined) {
-        if (this.telegramApi) {
-          try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Invalid option'); } catch { /* ignore */ }
+        if (api) {
+          try { await api.answerCallbackQuery(callbackQueryId, 'Invalid option'); } catch { /* ignore */ }
         }
         this.log(`Decision callback: option index ${optionIdx} out of range for ${decisionId}`);
         return;
@@ -586,20 +594,20 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         resolveDecision(this.paths, decisionId, chosen);
       } catch (err) {
         this.log(`Decision callback: resolveDecision failed for ${decisionId}: ${err}`);
-        if (this.telegramApi) {
-          try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Resolve failed'); } catch { /* ignore */ }
+        if (api) {
+          try { await api.answerCallbackQuery(callbackQueryId, 'Resolve failed'); } catch { /* ignore */ }
         }
         return;
       }
-      if (this.telegramApi) {
-        try { await this.telegramApi.answerCallbackQuery(callbackQueryId, `Recorded: ${chosen}`); } catch { /* ignore */ }
+      if (api) {
+        try { await api.answerCallbackQuery(callbackQueryId, `Recorded: ${chosen}`); } catch { /* ignore */ }
         if (chatId && messageId) {
           const newText = `${existing.title}\n\n${existing.context}\n\n✓ Chose: ${chosen}`;
           // Empty inline_keyboard removes the buttons after pick — same
           // shape used by the approval branch's editMessageText (label
           // string, no markup). We pass an explicit empty keyboard so
           // any prior button row is cleared.
-          try { await this.telegramApi.editMessageText(chatId, messageId, newText, { inline_keyboard: [] }); } catch { /* ignore */ }
+          try { await api.editMessageText(chatId, messageId, newText, { inline_keyboard: [] }); } catch { /* ignore */ }
         }
       }
       // Log to activity channel via event log so dashboard surfaces it.
@@ -626,7 +634,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     // prefix check is cheap and routing-agnostic.
     const apprMatch = data.match(/^appr_(allow|deny)_(approval_\d+_[a-zA-Z0-9]+)$/);
     if (apprMatch) {
-      await this.routeApprovalCallback(apprMatch[1] as 'allow' | 'deny', apprMatch[2], query, this.telegramApi);
+      await this.routeApprovalCallback(apprMatch[1] as 'allow' | 'deny', apprMatch[2], query, api);
       return;
     }
 
@@ -638,11 +646,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const responseFile = join(this.paths.stateDir, `hook-response-${hexId}.json`);
       writeFileSync(responseFile, JSON.stringify({ decision: hookDecision }) + '\n', 'utf-8');
 
-      if (this.telegramApi) {
-        try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
+      if (api) {
+        try { await api.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
         if (chatId && messageId) {
           const labelMap: Record<string, string> = { allow: 'Approved', deny: 'Denied', continue: 'Continue in Chat' };
-          try { await this.telegramApi.editMessageText(chatId, messageId, labelMap[decision] || decision); } catch { /* ignore */ }
+          try { await api.editMessageText(chatId, messageId, labelMap[decision] || decision); } catch { /* ignore */ }
         }
       }
       this.log(`Permission callback: ${decision} for ${hexId}`);
@@ -656,11 +664,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const responseFile = join(this.paths.stateDir, `restart-response-${hexId}.json`);
       writeFileSync(responseFile, JSON.stringify({ decision }) + '\n', 'utf-8');
 
-      if (this.telegramApi) {
-        try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
+      if (api) {
+        try { await api.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
         if (chatId && messageId) {
           const label = decision === 'allow' ? 'Restart Approved' : 'Restart Denied';
-          try { await this.telegramApi.editMessageText(chatId, messageId, label); } catch { /* ignore */ }
+          try { await api.editMessageText(chatId, messageId, label); } catch { /* ignore */ }
         }
       }
       this.log(`Restart callback: ${decision} for ${hexId}`);
