@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
+import { getToken } from 'next-auth/jwt';
 
 // Allowed CORS origins - localhost dev + configured deployment URL + mobile app
 // Built once at module load: env-derived origins are validated via `new URL()`,
@@ -67,25 +68,29 @@ export async function middleware(request: NextRequest) {
     });
   }
 
+  // /nt8 UI moved to dashboard.profithits.app — redirect before auth check
+  if (pathname === '/nt8' || pathname.startsWith('/nt8/')) {
+    return NextResponse.redirect('https://dashboard.profithits.app/nt8-remote');
+  }
+
   // Allow public paths
   // Security (H7): SSE endpoints require ?token=<jwt> auth — removed from public whitelist
-  // /api/flip-signal and /api/orb-status are intentionally public: read-only signals for NT8 NinjaScript (no auth header possible)
   // /api/pa-account is intentionally public: read-only PA account metrics for NT8 MonkeyAttackMonitor
   // /api/nt8/state-update, /api/nt8/pending-commands, /api/nt8/command-ack, /api/nt8/events (POST) are public:
   //   inbound from VPS relay/watchdog which cannot send auth headers
   // /api/nt8/state, /api/nt8/command, /api/nt8/stream: authenticated (dashboard users only)
+  // GAP-0034: /api/workflows/health is an unauthenticated health probe
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
-    pathname.startsWith('/api/flip-signal') ||
-    pathname.startsWith('/api/orb-status') ||
     pathname.startsWith('/api/pa-account') ||
     pathname.startsWith('/api/nt8/state-update') ||
     pathname.startsWith('/api/nt8/pending-commands') ||
     pathname.startsWith('/api/nt8/command-ack') ||
     pathname.startsWith('/api/nt8/events') ||
     pathname.startsWith('/_next') ||
-    pathname === '/favicon.ico'
+    pathname === '/favicon.ico' ||
+    pathname === '/api/workflows/health'
   ) {
     const response = NextResponse.next();
     response.headers.set('Access-Control-Allow-Origin', corsOrigin);
@@ -93,10 +98,20 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Check for next-auth session token cookie (web dashboard)
-  const hasSession =
-    request.cookies.has('authjs.session-token') ||
-    request.cookies.has('__Secure-authjs.session-token');
+  // GAP-0030: Verify the NextAuth session token using getToken — previous cookie
+  // presence-only check could be satisfied with any cookie value (confirmed exploit
+  // 2026-05-16T11:30Z). getToken decodes and verifies the NextAuth JWE using
+  // AUTH_SECRET — only sessions issued by lib/auth.ts pass.
+  const authSecretForSession = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+  let hasSession = false;
+  if (authSecretForSession) {
+    try {
+      const token = await getToken({ req: request, secret: authSecretForSession });
+      hasSession = token !== null;
+    } catch {
+      hasSession = false;
+    }
+  }
 
   // Check for Bearer token (mobile app)
   const authHeader = request.headers.get('Authorization');
