@@ -79,7 +79,9 @@ export async function middleware(request: NextRequest) {
   // /api/nt8/state-update, /api/nt8/pending-commands, /api/nt8/command-ack, /api/nt8/events (POST) are public:
   //   inbound from VPS relay/watchdog which cannot send auth headers
   // /api/nt8/state, /api/nt8/command, /api/nt8/stream: authenticated (dashboard users only)
-  // GAP-0034: /api/workflows/health is an unauthenticated health probe
+  // GAP-0034: /api/workflows/health is an unauthenticated health probe — must be
+  // reachable from monitoring contexts (load balancers, watcher crons, external
+  // watchdogs) without requiring a session cookie. Auth-gating defeats the purpose.
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
@@ -98,19 +100,42 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // GAP-0030: Verify the NextAuth session token using getToken — previous cookie
-  // presence-only check could be satisfied with any cookie value (confirmed exploit
-  // 2026-05-16T11:30Z). getToken decodes and verifies the NextAuth JWE using
-  // AUTH_SECRET — only sessions issued by lib/auth.ts pass.
+  // GAP-0030: Verify the NextAuth session token. Previous implementation only
+  // checked `request.cookies.has('authjs.session-token')` — a name-only presence
+  // check that any attacker could satisfy with `Cookie: authjs.session-token=anything`.
+  // Behavioral exploit was confirmed 2026-05-16T11:30Z: fake-value cookie returned
+  // 200 OK on `/api/approvals`. Replaced with `getToken` which decodes and
+  // verifies the NextAuth JWE using AUTH_SECRET — only sessions actually
+  // issued by `lib/auth.ts` pass.
   const authSecretForSession = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
   let hasSession = false;
   if (authSecretForSession) {
     try {
-      const token = await getToken({ req: request, secret: authSecretForSession });
-      hasSession = token !== null;
+      const token = await getToken({
+        req: request,
+        secret: authSecretForSession,
+        // NextAuth v5 auto-detects the cookie name based on secureCookie;
+        // we rely on that default so this works in both dev (`authjs.session-token`)
+        // and prod (`__Secure-authjs.session-token`).
+      });
+      hasSession = !!token;
     } catch {
       hasSession = false;
     }
+  } else {
+    // No secret configured — refuse rather than silently allow. Same posture
+    // as the Bearer-token branch below.
+    console.error(
+      '[middleware] CRITICAL: AUTH_SECRET/NEXTAUTH_SECRET is unset. Refusing all requests until configured.',
+      { pathname, method: request.method },
+    );
+    const res = NextResponse.json(
+      { error: 'Server misconfiguration: auth secret not configured' },
+      { status: 500 },
+    );
+    res.headers.set('Access-Control-Allow-Origin', corsOrigin);
+    res.headers.set('Vary', 'Origin');
+    return res;
   }
 
   // Check for Bearer token (mobile app)

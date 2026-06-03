@@ -2601,6 +2601,12 @@ busCommand
   .command('hook-session-end')
   .description('SessionEnd hook: memory capture + event log for session persistence')
   .action(() => runHook('hook-session-end'));
+
+busCommand
+  .command('hook-loop-detector')
+  .description('PreToolUse hook: detects and blocks repeated tool loops (same-args repetition + ping-pong alternation)')
+  .action(() => runHook('hook-loop-detector'));
+
 // --- OAuth token rotation commands ---
 
 busCommand
