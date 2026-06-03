@@ -535,14 +535,23 @@ export class AgentManager {
       // — follow-up task_1776054009969_099 tracks migrating to a dedicated
       // singleton or Telegram webhook if the coupling ever causes real
       // operator pain. Non-orchestrator agents skip this entirely.
-      await this.maybeStartActivityChannelPoller(name, org, agentDir, log);
+      // Pass resolvedOrg, NOT the raw `org` param. On individual restarts
+      // (restartAgent → startAgent(name, '') with no org, plus crash /
+      // force-fresh / --continue reload paths) `org` is undefined, which made
+      // both maybeStart*Poller methods bail at their `if (!org) return;` guard —
+      // so the activity-channel AND Taskmaster decision pollers silently never
+      // came back after any restart, only after a cold discoverAndStart boot.
+      // That stranded all send-decision button taps (offset frozen for days).
+      // resolvedOrg is always defined (resolveAgentOrg falls back), so this is
+      // strictly more correct than `org` and identical on cold boot.
+      await this.maybeStartActivityChannelPoller(name, resolvedOrg, agentDir, log);
 
       // Orchestrator-only: start the single central Taskmaster poller so
       // decisions sent via TASKMASTER_BOT_TOKEN (from any agent in the org)
       // are answered by one bot in one Telegram thread. Same lifecycle
       // coupling as the activity-channel poller. No-op when the org has no
       // TASKMASTER_BOT_TOKEN configured.
-      await this.maybeStartTaskmasterPoller(name, org, log);
+      await this.maybeStartTaskmasterPoller(name, resolvedOrg, log);
     }
   }
 
