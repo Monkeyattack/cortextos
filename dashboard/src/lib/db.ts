@@ -149,6 +149,41 @@ function initializeSchema(db: Database.Database): void {
       reset_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS deals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      name TEXT NOT NULL,
+      category TEXT,
+      asset_class TEXT,
+      location TEXT,
+      revenue REAL,
+      sde REAL,
+      ebitda REAL,
+      ask REAL,
+      multiple REAL GENERATED ALWAYS AS (
+        CASE
+          WHEN sde IS NOT NULL AND sde > 0 THEN ROUND(ask / sde, 2)
+          WHEN ebitda IS NOT NULL AND ebitda > 0 THEN ROUND(ask / ebitda, 2)
+          ELSE NULL
+        END
+      ) STORED,
+      tier TEXT DEFAULT 'watch',
+      status TEXT NOT NULL DEFAULT 'sourced',
+      listing_url TEXT,
+      dealbook_url TEXT,
+      loi_url TEXT,
+      deck_url TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_deals_listing_url ON deals(listing_url) WHERE listing_url IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
+    CREATE INDEX IF NOT EXISTS idx_deals_tier ON deals(tier);
+    CREATE INDEX IF NOT EXISTS idx_deals_source ON deals(source);
+    CREATE INDEX IF NOT EXISTS idx_deals_asset_class ON deals(asset_class);
+
     -- Indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_tasks_org ON tasks(org);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -213,6 +248,7 @@ export function getTableCounts(): Record<string, number> {
     'users',
     'messages',
     'sync_meta',
+    'deals',
   ];
   const counts: Record<string, number> = {};
   for (const table of tables) {
