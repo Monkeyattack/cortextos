@@ -19,8 +19,11 @@ function computeStatus(
   balance: number | null,
   threshold: number | null,
 ): { status: string; status_reason: string } {
-  if (balance === null || threshold === null) {
-    return { status: 'ACTIVE', status_reason: 'No live balance data — defaulting to ACTIVE' };
+  if (balance === null || balance === 0) {
+    return { status: 'INACTIVE', status_reason: 'No readable balance — account inactive or unreadable' };
+  }
+  if (threshold === null) {
+    return { status: 'ACTIVE', status_reason: 'Balance present but no drawdown threshold configured' };
   }
   if (balance <= threshold) {
     return { status: 'HALTED', status_reason: 'Balance at or below trailing drawdown threshold — halt trading' };

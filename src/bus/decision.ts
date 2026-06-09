@@ -138,6 +138,16 @@ export async function createDecision(
     throw new Error('createDecision: options must be a non-empty array');
   }
 
+  // Dedup: if a pending decision with the same title + agent already exists,
+  // return it instead of minting a new one. Prevents duplicate Telegram cards
+  // when taskmaster re-surfaces an unresolved item.
+  const existing = readState(paths).decisions.find(
+    (d) => d.status === 'pending' && d.title === args.title && d.agent === args.agent,
+  );
+  if (existing) {
+    return { id: existing.id, message_id: existing.message_id };
+  }
+
   const epoch = Math.floor(Date.now() / 1000);
   const rand = randomString(5);
   const id = `decision_${epoch}_${rand}`;
