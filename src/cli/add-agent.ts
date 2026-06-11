@@ -191,6 +191,7 @@ export const addAgentCommand = new Command('add-agent')
         '#',
         'BOT_TOKEN=',
         'CHAT_ID=',
+        'ALLOWED_USER=',
         '',
         '# Claude Code v2.1.111+ gives Sonnet 4.6 a 1M context window by default.',
         '# On plans WITHOUT "extra usage" billing, compaction fails at 100% ctx with:',
