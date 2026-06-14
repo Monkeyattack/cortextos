@@ -33,6 +33,13 @@ export class AgentProcess {
   private crashTimestamps: number[] = [];
   private crashWindowMs: number = 0;
   private crashWindowMax: number = 0;
+  // Rapid-continue-crash detection: when a --continue session starts into a
+  // near-full context and crashes almost immediately, the daemon restarts with
+  // --continue again into the same bloated context and loops. These track the
+  // timestamps of recent rapid --continue exits so we can arm .force-fresh and
+  // break the loop (companion to the image-poison auto-recovery in handleExit).
+  private rapidContinueTimestamps: number[] = [];
+  private lastStartWasContinue: boolean = false;
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -108,7 +115,9 @@ export class AgentProcess {
     }
 
     // Determine start mode
-    const mode = this.shouldContinue() ? 'continue' : 'fresh';
+    const continueMode = this.shouldContinue();
+    this.lastStartWasContinue = continueMode;
+    const mode = continueMode ? 'continue' : 'fresh';
     const prompt = mode === 'fresh'
       ? this.buildStartupPrompt()
       : this.buildContinuePrompt();
@@ -581,6 +590,37 @@ export class AgentProcess {
         }
       }, 5000);
       return;
+    }
+
+    // Rapid-continue-crash loop detection. A --continue session that starts
+    // into a near-full context can crash within seconds; the daemon then
+    // restarts with --continue again into the same bloated history and loops.
+    // If we see RAPID_CONTINUE_MAX such rapid exits within the rolling window,
+    // arm .force-fresh so the NEXT start() discards conversation history and
+    // breaks the loop. Unlike image-poison recovery, we do NOT return here —
+    // we fall through to normal crash recovery (backoff + restart); the only
+    // change is that the next start uses fresh context instead of --continue.
+    const RAPID_CONTINUE_THRESHOLD_MS = 5 * 60 * 1000;
+    const RAPID_CONTINUE_WINDOW_MS = 10 * 60 * 1000;
+    const RAPID_CONTINUE_MAX = 3;
+
+    if (this.lastStartWasContinue && this.sessionStart) {
+      const sessionDurationMs = Date.now() - this.sessionStart.getTime();
+      if (sessionDurationMs < RAPID_CONTINUE_THRESHOLD_MS) {
+        const now = Date.now();
+        this.rapidContinueTimestamps.push(now);
+        this.rapidContinueTimestamps = this.rapidContinueTimestamps.filter(
+          (ts) => now - ts <= RAPID_CONTINUE_WINDOW_MS,
+        );
+        if (this.rapidContinueTimestamps.length >= RAPID_CONTINUE_MAX) {
+          this.log(
+            "Rapid-continue-crash loop detected: " + this.rapidContinueTimestamps.length +
+            " rapid exits in " + (RAPID_CONTINUE_WINDOW_MS / 60000) + "min window — arming .force-fresh"
+          );
+          this.rapidContinueTimestamps = [];
+          this.armForceFresh("rapid-continue-crash auto-recovery");
+        }
+      }
     }
 
     // Anthropic rate-limit detection. If the agent's stdout tail shows a
