@@ -208,6 +208,47 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent);
     CREATE INDEX IF NOT EXISTS idx_messages_org ON messages(org);
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+
+    -- Delivery model: SOWs and deliverables (2026-06-18)
+    CREATE TABLE IF NOT EXISTS sows (
+      id TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      consumer TEXT NOT NULL,
+      accepting_owner TEXT NOT NULL DEFAULT 'pmo',
+      objective TEXT NOT NULL,
+      background TEXT NOT NULL DEFAULT '',
+      in_scope TEXT NOT NULL DEFAULT '[]',
+      out_of_scope TEXT NOT NULL DEFAULT '[]',
+      constraints TEXT NOT NULL DEFAULT '',
+      deliverable_ids TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'draft',
+      release_note_id TEXT,
+      org TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS deliverables (
+      id TEXT PRIMARY KEY,
+      sow_id TEXT NOT NULL REFERENCES sows(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      owner_agent TEXT NOT NULL,
+      success_criteria TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'not_started',
+      signed_off_by TEXT,
+      signed_off_at TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_run TEXT,
+      org TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sows_org ON sows(org);
+    CREATE INDEX IF NOT EXISTS idx_sows_status ON sows(status);
+    CREATE INDEX IF NOT EXISTS idx_deliverables_sow ON deliverables(sow_id);
+    CREATE INDEX IF NOT EXISTS idx_deliverables_status ON deliverables(status);
+    CREATE INDEX IF NOT EXISTS idx_deliverables_owner ON deliverables(owner_agent);
   `);
 }
 
@@ -249,6 +290,8 @@ export function getTableCounts(): Record<string, number> {
     'messages',
     'sync_meta',
     'deals',
+    'sows',
+    'deliverables',
   ];
   const counts: Record<string, number> = {};
   for (const table of tables) {
