@@ -4,7 +4,7 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
-import { checkInbox, ackInbox } from '../bus/message.js';
+import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { getDecision, resolveDecision } from '../bus/decision.js';
 import { logEvent } from '../bus/event.js';
@@ -617,6 +617,13 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
           try { await api.editMessageText(chatId, messageId, newText, { inline_keyboard: [] }); } catch { /* ignore */ }
         }
       }
+      // Deliver inbox notification to the owning agent so it knows the
+      // decision was resolved without needing to poll list-decisions.
+      // Mirrors the approval flow (approval.ts resolveApproval → sendMessage).
+      try {
+        const notifyText = `Decision resolved: "${existing.title}" → ${chosen}\n\ndecision_id: ${decisionId}`;
+        sendMessage(this.paths, 'system', existing.agent, 'normal', notifyText);
+      } catch { /* non-fatal — state file is source of truth */ }
       // Log to activity channel via event log so dashboard surfaces it.
       try {
         const org = process.env.CTX_ORG || 'unknown';
