@@ -63,7 +63,16 @@ export async function GET(request: NextRequest) {
     const params: string[] = [];
     if (sow_id) { query += ' AND sow_id = ?'; params.push(sow_id); }
     if (org) { query += ' AND org = ?'; params.push(org); }
-    if (status) { query += ' AND status = ?'; params.push(status); }
+    const stalled = searchParams.get('stalled');
+    const thresholdHours = parseInt(searchParams.get('threshold_hours') || '24', 10);
+    if (stalled === 'true') {
+      query += " AND status IN ('in_progress', 'needs_qa', 'qa_failed') AND updated_at < datetime('now', '-' || ? || ' hours')";
+      params.push(String(thresholdHours));
+      // skip status filter since stalled already constrains it
+    } else if (status) {
+      query += ' AND status = ?';
+      params.push(status);
+    }
     query += ' ORDER BY created_at ASC';
 
     const rows = db.prepare(query).all(...params) as DeliverableRow[];
