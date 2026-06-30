@@ -70,7 +70,17 @@ export interface RegisterCommandsResult {
   count: number;
   commands: { command: string; description: string }[];
   error?: string;
+  /** Number of commands dropped to satisfy Telegram's 100-command cap. */
+  dropped?: number;
 }
+
+/**
+ * Telegram's setMyCommands rejects any list longer than 100 entries with
+ * `Bad Request: BOT_COMMANDS_TOO_MUCH`. The framework catalog now ships far
+ * more than 100 user-invocable skills/commands, so the combined agent +
+ * framework list must be capped before the API call.
+ */
+export const TELEGRAM_MAX_COMMANDS = 100;
 
 // --- collectMetrics ---
 
@@ -522,6 +532,14 @@ export async function registerTelegramCommands(
     return { status: 'empty', count: 0, commands: [], error: 'No commands found to register' };
   }
 
+  // Enforce Telegram's hard 100-command cap. collectTelegramCommands scans the
+  // agent dir before the framework root, so the kept slice favours the agent's
+  // own commands and drops the framework-catalog overflow that would otherwise
+  // trigger BOT_COMMANDS_TOO_MUCH (registration would fail entirely, leaving the
+  // slash menu empty).
+  const dropped = Math.max(0, commands.length - TELEGRAM_MAX_COMMANDS);
+  const sendCommands = dropped > 0 ? commands.slice(0, TELEGRAM_MAX_COMMANDS) : commands;
+
   const totalAttempts = Math.max(1, attempts);
   let lastError = 'Failed to register commands with Telegram';
 
@@ -533,12 +551,12 @@ export async function registerTelegramCommands(
       const response = await fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commands, scope: { type: 'all_private_chats' } }),
+        body: JSON.stringify({ commands: sendCommands, scope: { type: 'all_private_chats' } }),
       });
 
       const data = await response.json() as { ok: boolean; description?: string };
       if (data.ok) {
-        return { status: 'ok', count: commands.length, commands };
+        return { status: 'ok', count: sendCommands.length, commands: sendCommands, dropped };
       }
       lastError = data.description || 'Failed to register commands with Telegram';
     } catch (err) {
@@ -551,7 +569,7 @@ export async function registerTelegramCommands(
     }
   }
 
-  return { status: 'error', count: 0, commands, error: lastError };
+  return { status: 'error', count: 0, commands: sendCommands, error: lastError, dropped };
 }
 
 // --- Internal helpers ---

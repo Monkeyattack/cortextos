@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { FastChecker } from '../src/daemon/fast-checker.js';
+import type { AgentProcess } from '../src/daemon/agent-process.js';
+import type { BusPaths } from '../src/types/index.js';
 
 describe('Sprint 6: Fast-Checker Completeness', () => {
   const testDir = join(tmpdir(), `cortextos-sprint6-${Date.now()}`);
@@ -126,5 +129,63 @@ describe('Sprint 6: Fast-Checker Completeness', () => {
       expect(resolved).toBe(true);
       expect(elapsed).toBeLessThan(1000); // Should resolve in <1s, not 10s
     });
+  });
+
+  // Regression: each FastChecker registered a process-level SIGUSR1 listener in
+  // start() that was only removed when the poll loop exited. A throw in
+  // waitForBootstrap(), a re-entrant start(), or restart overlap leaked the
+  // listener, and with the full fleet that tripped MaxListenersExceededWarning
+  // (process MaxListeners = 20). The listener must be removed promptly on stop().
+  describe('SIGUSR1 listener lifecycle (no leak across start/stop)', () => {
+    function makePaths(): BusPaths {
+      return {
+        ctxRoot: testDir,
+        inbox: join(stateDir, 'inbox'),
+        inflight: join(stateDir, 'inflight'),
+        processed: join(stateDir, 'processed'),
+        logDir: join(testDir, 'logs', 'testbot'),
+        stateDir,
+        taskDir: join(stateDir, 'tasks'),
+        approvalDir: join(stateDir, 'approvals'),
+        analyticsDir: join(stateDir, 'analytics'),
+        deliverablesDir: join(testDir, 'deliverables'),
+      } as BusPaths;
+    }
+
+    // Parks the checker in waitForBootstrap (agent never bootstraps) so the
+    // SIGUSR1 listener is attached but the poll loop hasn't started — then lets
+    // it unwind cleanly so no 2s sleep timer dangles past the test.
+    async function startStopCycle(name: string): Promise<void> {
+      let bootstrapped = false;
+      const agent = { name, isBootstrapped: () => bootstrapped } as unknown as AgentProcess;
+      const fc = new FastChecker(agent, makePaths(), testDir, { pollInterval: 50 });
+
+      const baseline = process.listenerCount('SIGUSR1');
+      const startPromise = fc.start().catch(() => { /* parked, never resolves cleanly */ });
+      // Let start()'s synchronous prefix (listener registration) run.
+      await Promise.resolve();
+      expect(process.listenerCount('SIGUSR1')).toBe(baseline + 1);
+
+      fc.stop();
+      // Removal is immediate, not deferred to the loop exit.
+      expect(process.listenerCount('SIGUSR1')).toBe(baseline);
+
+      // Allow waitForBootstrap to return so the dangling promise settles.
+      bootstrapped = true;
+      await startPromise;
+      expect(process.listenerCount('SIGUSR1')).toBe(baseline);
+    }
+
+    it('attaches one listener on start and removes it on stop', async () => {
+      await startStopCycle('testbot');
+    }, 15000);
+
+    it('does not accumulate listeners across repeated start/stop cycles', async () => {
+      const baseline = process.listenerCount('SIGUSR1');
+      for (let i = 0; i < 4; i++) {
+        await startStopCycle(`bot${i}`);
+      }
+      expect(process.listenerCount('SIGUSR1')).toBe(baseline);
+    }, 30000);
   });
 });

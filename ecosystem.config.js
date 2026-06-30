@@ -32,6 +32,11 @@ module.exports = {
         // then watch the operator chat for "🚨 CRITICAL: daemon crash-looping"
         // after 3 crashes in 15 min.
         CTX_DEBUG_ALLOW_CRASH_TRIGGER: '0',
+        // Force Node.js to prefer IPv4 when resolving hostnames. The VPS has
+        // intermittent IPv6 connectivity (same CDN issue as Docker/crane); without
+        // this, dns.lookup returns the IPv6 address first for api.telegram.org
+        // (2001:67c:4e8:f004::9) causing sporadic 'fetch failed' poll errors.
+        NODE_OPTIONS: '--dns-result-order=ipv4first',
       },
       // max_restarts + restart_delay is the ultimate crash-storm circuit
       // breaker. If the daemon dies 10 times faster than 5s apart, PM2

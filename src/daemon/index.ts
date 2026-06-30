@@ -6,10 +6,19 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { ensureDir } from '../utils/atomic.js';
 
+// Outbound DNS is pinned to IPv4 via NODE_OPTIONS=--dns-result-order=ipv4first
+// in the daemon's PM2 config — this host's IPv6 route to api.telegram.org is
+// intermittently dead, which stalls the Telegram poller on v6 connections until
+// the 30s fetch abort fires. Kept at the process-launch layer (not in code) so
+// the operator retains a single, overridable control point.
+
 // Each fast-checker registers a process-level SIGUSR1 handler (see
-// fast-checker.ts:102). With >10 active agents the default Node listener cap
-// trips MaxListenersExceededWarning. Bump for the full fleet.
-process.setMaxListeners(20);
+// fast-checker.ts). One listener per running agent means the count tracks fleet
+// size; at 20 the cap was already below the live fleet (~21), tripping
+// MaxListenersExceededWarning on a clean boot. fast-checker now removes its
+// listener promptly on stop() (no leak across restarts), so this only needs to
+// clear the legitimate per-agent count plus restart-overlap headroom.
+process.setMaxListeners(64);
 
 // ---------------------------------------------------------------------------
 // Crash handling: turn silent daemon deaths into attributable, observable
