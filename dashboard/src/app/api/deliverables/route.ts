@@ -66,7 +66,11 @@ export async function GET(request: NextRequest) {
     const stalled = searchParams.get('stalled');
     const thresholdHours = parseInt(searchParams.get('threshold_hours') || '24', 10);
     if (stalled === 'true') {
-      query += " AND status IN ('in_progress', 'needs_qa', 'qa_failed') AND updated_at < datetime('now', '-' || ? || ' hours')";
+      // updated_at is written as new Date().toISOString() (e.g. 2026-06-29T10:00:00.000Z),
+      // but datetime('now', ...) returns SQLite format (2026-06-29 10:00:00). A raw lexicographic
+      // compare mismatches on the 'T' vs ' ' separator, so a same-day stalled row just past the
+      // threshold is silently missed. Wrap updated_at in datetime() so both sides are normalized.
+      query += " AND status IN ('in_progress', 'needs_qa', 'qa_failed') AND datetime(updated_at) < datetime('now', '-' || ? || ' hours')";
       params.push(String(thresholdHours));
       // skip status filter since stalled already constrains it
     } else if (status) {
