@@ -14,6 +14,7 @@ export default defineConfig({
     'hooks/hook-scrape-usage': 'src/hooks/hook-scrape-usage.ts',
     'hooks/hook-context-status': 'src/hooks/hook-context-status.ts',
     'hooks/hook-session-start': 'src/hooks/hook-session-start.ts',
+    'hooks/hook-session-end': 'src/hooks/hook-session-end.ts',
     'hooks/hook-loop-detector': 'src/hooks/hook-loop-detector.ts',
   },
   format: ['cjs'],

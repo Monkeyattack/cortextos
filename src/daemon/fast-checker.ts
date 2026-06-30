@@ -50,6 +50,12 @@ export class FastChecker {
   // Idle-session heartbeat watchdog
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
+  // Process-level SIGUSR1 handler. Held on the instance so stop() can detach it
+  // immediately and start() can guarantee removal via finally — otherwise a
+  // throw in waitForBootstrap() or restart overlap leaks one listener per
+  // checker, tripping MaxListenersExceededWarning across the fleet.
+  private sigusr1Handler: (() => void) | null = null;
+
   // Context monitor state
   private ctxConfigMtime: number = 0;
   private ctxWarningFiredAt: number = 0;    // dedup: 15min cooldown between warnings
@@ -92,7 +98,10 @@ export class FastChecker {
     this.running = true;
     this.log('Starting. Waiting for bootstrap...');
 
-    // Register SIGUSR1 handler for immediate wake
+    // Register SIGUSR1 handler for immediate wake. Detach any prior handler
+    // first so a re-entrant start() can't stack listeners, and keep a reference
+    // on the instance so stop()/finally can always remove exactly this one.
+    this.detachSigusr1();
     const sigusr1Handler = () => {
       this.log('SIGUSR1 received - waking immediately');
       if (this.wakeResolve) {
@@ -100,38 +109,52 @@ export class FastChecker {
         this.wakeResolve = null;
       }
     };
+    this.sigusr1Handler = sigusr1Handler;
     if (process.platform !== 'win32') {
       process.on('SIGUSR1', sigusr1Handler);
     }
 
-    // Wait for bootstrap
-    await this.waitForBootstrap();
-    this.log('Bootstrap complete. Beginning poll loop.');
+    try {
+      // Wait for bootstrap
+      await this.waitForBootstrap();
+      this.log('Bootstrap complete. Beginning poll loop.');
 
-    // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
-    const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
-    const agentName = this.agent.name;
-    this.heartbeatTimer = setInterval(() => {
-      const ts = new Date().toISOString();
-      execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
-        if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
-      });
-    }, HEARTBEAT_INTERVAL_MS);
+      // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
+      const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
+      const agentName = this.agent.name;
+      this.heartbeatTimer = setInterval(() => {
+        const ts = new Date().toISOString();
+        execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
+          if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
+        });
+      }, HEARTBEAT_INTERVAL_MS);
 
-    while (this.running) {
-      try {
-        // Check for urgent signal file
-        this.checkUrgentSignal();
-        await this.pollCycle();
-      } catch (err) {
-        this.log(`Poll error: ${err}`);
+      while (this.running) {
+        try {
+          // Check for urgent signal file
+          this.checkUrgentSignal();
+          await this.pollCycle();
+        } catch (err) {
+          this.log(`Poll error: ${err}`);
+        }
+        await this.sleepInterruptible(this.pollInterval);
       }
-      await this.sleepInterruptible(this.pollInterval);
+    } finally {
+      // Always detach the SIGUSR1 handler, even if waitForBootstrap() threw or
+      // the loop exited abnormally — guarantees listener count stays bounded.
+      this.detachSigusr1();
     }
+  }
 
-    if (process.platform !== 'win32') {
-      process.removeListener('SIGUSR1', sigusr1Handler);
+  /**
+   * Remove this checker's process-level SIGUSR1 handler if one is attached.
+   * Idempotent — safe to call from start()'s finally and from stop().
+   */
+  private detachSigusr1(): void {
+    if (this.sigusr1Handler && process.platform !== 'win32') {
+      process.removeListener('SIGUSR1', this.sigusr1Handler);
     }
+    this.sigusr1Handler = null;
   }
 
   /**
@@ -143,6 +166,11 @@ export class FastChecker {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    // Detach the SIGUSR1 listener immediately rather than waiting for the poll
+    // loop's in-flight sleep to drain — during a restart the replacement checker
+    // registers its own listener right away, so prompt removal here is what keeps
+    // overlap from pushing the process past its MaxListeners cap.
+    this.detachSigusr1();
   }
 
   /**
