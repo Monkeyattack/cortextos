@@ -405,6 +405,16 @@ if [ "$SOUL_LINES" -lt 30 ]; then
   MISSING="${MISSING} SOUL.md(incomplete)"
 fi
 
+# Unresolved template placeholders (e.g. {{day_mode_start}}) mean onboarding did not finish
+# filling this agent's config — a silent reliability gap (day/night gating undefined, etc).
+# See config-audit H2, 2026-07-02.
+for f in SOUL.md IDENTITY.md USER.md SYSTEM.md GUARDRAILS.md CLAUDE.md; do
+  FPATH="${CTX_AGENT_DIR}/${f}"
+  if [ -f "$FPATH" ] && grep -qE '\{\{[a-z_]+\}\}' "$FPATH"; then
+    MISSING="${MISSING} ${f}(unresolved-placeholder)"
+  fi
+done
+
 if [ -n "$MISSING" ]; then
   echo "BOOTSTRAP CHECK FAILED - missing or incomplete:${MISSING}"
   cortextos bus log-event error bootstrap_check_failed warning --meta '{"agent":"'$CTX_AGENT_NAME'","missing":"'"${MISSING}"'"}'
