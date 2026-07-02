@@ -78,16 +78,18 @@ Name the ONE thing the deal turns on. Examples:
 
 ### 5. Score (deterministic rubric — same inputs MUST produce the same score)
 
-Score each deal 0–100 using fixed point values. Unknowns take the fixed midpoint shown — never guess a value to move the score.
+Score each deal 0–100 using fixed point values. Unknowns take the fixed **conservative default** shown (deliberately set low-to-mid, NOT a true midpoint — an unknown should never help a deal's score) — never guess a value to move the score.
 
 | Component | Max | Points |
 |---|---|---|
 | **Multiple vs asset-class norm** | 30 | CHEAP = 30 · FAIR = 20 · RICH = 8 · no ask/SDE stated (uncomputable) = 10 |
-| **Revenue trend** | 20 | growing = 20 · flat = 12 · declining = 3 · unstated = 8 |
+| **Revenue trend** | 20 | growing = 20 · flat = 12 · declining = 3 (sustained down-trend SHORT of collapse — see structural-killer below) · unstated = 8 |
 | **Industry risk** | 15 | low = 15 · medium = 9 · high (secular decline, platform-dependent category, regulatory cliff) = 3 · unknown = 8. Use `industry-profile` output (`risk_factors`, `life_cycle_stage`) when available; else judge from category. |
 | **Owner dependency** | 15 | absentee/manager-run = 15 · owner active but team in place = 9 · key-person cliff (owner IS the business) = 3 · unstated = 7 |
 | **Deal type** | 10 | asset sale = 10 · stock sale = 6 · unstated = 5 |
 | **Ask price stated** | 10 | stated = 10 · request-conversation model (Rejigg-style, by design) = 5 · simply absent = 3 |
+
+> **Missing-ask double-count is BY DESIGN, not a bug — do not "dedupe" it.** A deal with no ask is reflected in TWO components (Multiple uncomputable = 10 AND Ask price absent = 3) because a missing price both blocks valuation and lowers deal quality. For request-conversation models (Rejigg / Accredited "by design" no-ask), the Ask component uses its = 5 value, which deliberately softens the effect. Leave both in.
 
 **Rating bands** (with tier mapping — the deals board `tier` field keeps the pursue/watch/pass vocabulary):
 
@@ -97,13 +99,19 @@ Score each deal 0–100 using fixed point values. Unknowns take the fixed midpoi
 | 45–69 | **WATCHLIST** | `watch` |
 | < 45 | **PASS** | `pass` |
 
-Every rating gets a **1-sentence rationale** naming the dominant factor (e.g. "STRONG — 2.4x on growing revenue with a GM already running ops."). A structural killer (fraud smell, revenue collapse, unfixable concentration >70%) overrides the score to PASS — say so explicitly.
+Every rating gets a **1-sentence rationale** naming the dominant factor (e.g. "STRONG — 2.4x on growing revenue with a GM already running ops.").
 
-### 5b. Tier
+**Structural-killer override (the ONLY thing that overrides the numeric band):** a genuine structural killer forces PASS regardless of score — say so explicitly. Killers are: **fraud smell**, **revenue collapse** (>~30% YoY decline, or going-concern doubt — distinct from ordinary "declining", which is scored at 3, not an override), **unfixable concentration >70%** (one channel/customer/platform). Ordinary weaknesses (key-person dependence, a rich ask, a merely-declining trend) are ALREADY captured in the numeric score and are NOT overrides — do not double-apply them.
 
-- **PURSUE** — strong unit economics, clean story, reasonable ask; merits the full workup
-- **WATCH** — interesting but one concern blocks immediate move; specify what would need to change
-- **PASS** — structural problem (key-person cliff, declining revenue, ask too rich, platform too concentrated); name the killer
+### 5b. Tier (derived from §5 — do NOT re-judge)
+
+Tier is a **direct mapping** from the §5 rating band. The numeric band (§5) is authoritative; there is no separate prose tier test here (a second path would re-introduce non-determinism):
+
+- **STRONG (≥ 70) → PURSUE** — merits the full workup
+- **WATCHLIST (45–69) → WATCH** — name the single concern that blocks an immediate move
+- **PASS (< 45) → PASS**
+
+The only override is the §5 structural-killer rule above, which forces PASS.
 
 ### 6. Top 3 Risks
 
@@ -156,4 +164,4 @@ If they say not yet / pass → log the tier and move on. No task created unless 
 
 ---
 
-_Skill owner: pm (analytical content) / devops (registration + mechanics). Pairs with `deal-workup` (full pipeline) and `deal-flow-scan` (batch/inbox version). Last updated: 2026-07-02 (deterministic 0–100 scoring rubric + STRONG/WATCHLIST/PASS rating)._
+_Skill owner: pm (analytical content) / devops (registration + mechanics). Pairs with `deal-workup` (full pipeline) and `deal-flow-scan` (batch/inbox version). Last updated: 2026-07-02 (deterministic 0–100 scoring rubric + STRONG/WATCHLIST/PASS rating; rubric-consistency fixes — conservative-default wording, §5 band made authoritative over §5b, declining-vs-collapse threshold, missing-ask double-count documented)._

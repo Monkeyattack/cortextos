@@ -158,7 +158,7 @@ If a Google Sheet URL or CSV export is provided:
 
 ## STAGE 2 — PER-DEAL VET (reuse `quick-vet`)
 
-For each extracted deal, run the `quick-vet` logic — including its **deterministic 0–100 scoring rubric** (quick-vet SKILL.md §5: multiple vs norm 30 / revenue trend 20 / industry risk 15 / owner dependency 15 / deal type 10 / ask stated 10; unknowns take fixed midpoints, never guessed):
+For each extracted deal, run the `quick-vet` logic — including its **deterministic 0–100 scoring rubric** (quick-vet SKILL.md §5: multiple vs norm 30 / revenue trend 20 / industry risk 15 / owner dependency 15 / deal type 10 / ask stated 10; unknowns take fixed conservative defaults — deliberately low-to-mid, never a helpful value, never guessed):
 
 ```
 Multiple    = Asking Price ÷ SDE  (or ÷ EBITDA — note which)
