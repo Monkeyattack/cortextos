@@ -92,6 +92,8 @@ function buildKBEnv(
     MMRAG_DIR: kbRoot,
     MMRAG_CHROMADB_DIR: join(kbRoot, 'chromadb'),
     MMRAG_CONFIG: join(kbRoot, 'config.json'),
+    // Disable chromadb posthog telemetry — hangs on IPv6-dead VPS (same root as Telegram AAAA stall)
+    ANONYMIZED_TELEMETRY: 'False',
   };
 }
 
@@ -180,7 +182,9 @@ export function queryKnowledgeBase(
         '--json',
       ], {
         encoding: 'utf-8',
-        timeout: 30000,
+        // chromadb import takes ~17-20s on this VPS (hnswlib native load + posthog init even with telemetry off).
+        // 30s was too tight — silent catch() + null means "0 results" with no hint. 90s covers import + query.
+        timeout: 90000,
         env,
       });
     } catch {
