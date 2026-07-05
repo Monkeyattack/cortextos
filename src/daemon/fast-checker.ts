@@ -129,23 +129,24 @@ export class FastChecker {
       await this.waitForBootstrap();
       this.log('Bootstrap complete. Beginning poll loop.');
 
-    // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
-    const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
-    const agentName = this.agent.name;
-    this.heartbeatTimer = setInterval(() => {
-      const ts = new Date().toISOString();
-      execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
-        if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
-      });
-    }, HEARTBEAT_INTERVAL_MS);
+      // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
+      const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
+      const agentName = this.agent.name;
+      this.heartbeatTimer = setInterval(() => {
+        const ts = new Date().toISOString();
+        execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
+          if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
+        });
+      }, HEARTBEAT_INTERVAL_MS);
 
-    while (this.running) {
-      try {
-        // Check for urgent signal file
-        this.checkUrgentSignal();
-        await this.pollCycle();
-      } catch (err) {
-        this.log(`Poll error: ${err}`);
+      while (this.running) {
+        try {
+          // Check for urgent signal file
+          this.checkUrgentSignal();
+          await this.pollCycle();
+        } catch (err) {
+          this.log(`Poll error: ${err}`);
+        }
       }
     } finally {
       // Always detach the SIGUSR1 handler, even if waitForBootstrap() threw or
