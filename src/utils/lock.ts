@@ -1,4 +1,4 @@
-import { mkdirSync, rmdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, rmdirSync, writeFileSync, readFileSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -34,8 +34,22 @@ export function acquireLock(dir: string): boolean {
     try {
       storedPidRaw = readFileSync(pidFile, 'utf-8').trim();
     } catch {
-      // PID file not yet written.  Holder is between mkdir and writeFileSync.
-      // Refuse the lock — the caller's retry loop will try again.
+      // PID file not yet written.  Two cases:
+      // 1. Holder is mid-acquire (mkdir done, writeFileSync pending) — refuse.
+      // 2. Holder crashed before writing pid — stale lock that will never clear.
+      // Distinguish by lockDir mtime: if the dir is >10s old with no pid file,
+      // the holder is dead.  Attempt recovery; if another process beats us, retry.
+      try {
+        const age = Date.now() - statSync(lockDir).mtimeMs;
+        if (age > 10_000) {
+          rmSync(lockDir, { recursive: true, force: true });
+          mkdirSync(lockDir);
+          writeFileSync(pidFile, String(process.pid));
+          return true;
+        }
+      } catch {
+        // stat failed or race on cleanup — let caller retry
+      }
       return false;
     }
 
