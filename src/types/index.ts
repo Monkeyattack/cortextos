@@ -68,14 +68,6 @@ export interface Task {
    */
   blocks?: string[];
   blocked_by?: string[];
-  /**
-   * Optional structured metadata. Used by error-triggered tasks (e.g.
-   * ai-theist render workers' failure-trigger helper) to carry
-   * `triggered_by_event_id` so the task can be programmatically
-   * correlated with the upstream event that caused it. Free-form bag —
-   * the writer owns the schema. Read by autoresearch / dashboard.
-   */
-  metadata?: Record<string, unknown>;
 }
 
 // Event Types
@@ -192,11 +184,6 @@ export interface AgentConfig {
     never_ask: string[];
   };
   ecosystem?: EcosystemConfig;
-  quota?: {
-    daily_budget_usd?: number;
-    soft_pct?: number;
-    hard_pct?: number;
-  };
   /** Context window % at which to warn agent + user. Default: 70. Absent = observe-only. */
   ctx_warning_threshold?: number;
   /** Context window % at which to inject handoff prompt and hard-restart. Default: 80. */
@@ -208,12 +195,25 @@ export interface AgentConfig {
    */
   codex_context_cap?: number;
   /**
+   * Fallback context window cap (tokens) for opencode agents when the OpenCode
+   * model cache does not expose a context limit. Only applies to runtime:
+   * 'opencode'.
+   */
+  opencode_context_cap?: number;
+  /**
    * Agent runtime. Defaults to 'claude-code' when absent.
    * 'hermes' selects the HermesPTY spawn path (Python persistent REPL,
    * NousResearch/hermes-agent) with Hermes-specific bootstrap, session
    * continuity, and exit handling.
+   * 'opencode' selects the OpencodePTY spawn path, a native PTY terminal
+   * runtime for opencode.ai's OpenCode CLI.
    */
-  runtime?: 'claude-code' | 'hermes' | 'codex-app-server';
+  runtime?: 'claude-code' | 'hermes' | 'codex-app-server' | 'opencode';
+  /**
+   * Optional OpenCode agent name to pass as `opencode --agent <name>`.
+   * Only applies to runtime: 'opencode'.
+   */
+  opencode_agent?: string;
   /**
    * Whether this agent runs a Telegram poller. Defaults to true when absent
    * (preserves existing behaviour). Set to false on specialist agents that
@@ -236,21 +236,6 @@ export interface CronEntry {
   /** "recurring" (default) restores on every session start.
    *  "once" restores only if fire_at is still in the future; deleted after firing. */
   type?: 'recurring' | 'once' | 'disabled';
-  /**
-   * Maximum age in minutes before a gap-nudge is suppressed.
-   * Use for time-windowed crons (e.g. a pre-market check at 09:20 ET): if the
-   * daemon detects a gap but the cron's window has already passed, injecting a
-   * nudge would cause a late stale fire. Set max_age_minutes to the number of
-   * minutes after the scheduled time beyond which the cron is no longer useful.
-   */
-  max_age_minutes?: number;
-  /**
-   * Who manages this cron's scheduling.
-   * "daemon" (default) — the daemon schedules and tracks fires in cron-state.json.
-   * "harness" — the Claude Code harness (CronCreate) manages firing; no cron-state.json
-   *   entry is written, so gap-detection must skip these or it will nudge indefinitely.
-   */
-  scheduled_by?: 'daemon' | 'harness';
 }
 
 // ---------------------------------------------------------------------------

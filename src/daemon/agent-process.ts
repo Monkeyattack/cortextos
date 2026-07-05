@@ -5,7 +5,8 @@ import type { AgentConfig, AgentStatus, CtxEnv } from '../types/index.js';
 import { AgentPTY } from '../pty/agent-pty.js';
 import { CodexAppServerPTY } from '../pty/codex-app-server-pty.js';
 import { HermesPTY, hermesDbExists } from '../pty/hermes-pty.js';
-import { MessageDedup, injectMessage } from '../pty/inject.js';
+import { OpencodePTY, opencodeSessionExists } from '../pty/opencode-pty.js';
+import { MessageDedup, injectMessage as injectMessageIntoPty } from '../pty/inject.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
@@ -33,13 +34,6 @@ export class AgentProcess {
   private crashTimestamps: number[] = [];
   private crashWindowMs: number = 0;
   private crashWindowMax: number = 0;
-  // Rapid-continue-crash detection: when a --continue session starts into a
-  // near-full context and crashes almost immediately, the daemon restarts with
-  // --continue again into the same bloated context and loops. These track the
-  // timestamps of recent rapid --continue exits so we can arm .force-fresh and
-  // break the loop (companion to the image-poison auto-recovery in handleExit).
-  private rapidContinueTimestamps: number[] = [];
-  private lastStartWasContinue: boolean = false;
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -74,8 +68,7 @@ export class AgentProcess {
   private telegramChatId: string | null = null;
   // Issue #392: tracks whether the most recently built startup prompt consumed
   // a handoff doc marker. start() reads this after spawn to decide whether the
-  // daemon should fire the codex-app-server back-online Telegram directly
-  // (skipped on handoff restart — the agent sends its own contextual reply).
+  // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
@@ -141,9 +134,11 @@ export class AgentProcess {
     this.log(`Log path: ${logPath}`);
     this.pty = this.config.runtime === 'hermes'
       ? new HermesPTY(this.env, this.config, logPath)
-      : this.config.runtime === 'codex-app-server'
-        ? new CodexAppServerPTY(this.env, this.config, logPath)
-        : new AgentPTY(this.env, this.config, logPath);
+      : this.config.runtime === 'opencode'
+        ? new OpencodePTY(this.env, this.config, logPath)
+        : this.config.runtime === 'codex-app-server'
+          ? new CodexAppServerPTY(this.env, this.config, logPath)
+          : new AgentPTY(this.env, this.config, logPath);
 
     // Issue #330: re-wire the Telegram handle on every start() (session refresh
     // creates a fresh CodexAppServerPTY). Only CodexAppServerPTY uses this — Claude / Hermes
@@ -192,12 +187,7 @@ export class AgentProcess {
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
 
-      // Issue #392: codex-app-server does not reliably execute the inline
-      // "Send a Telegram message saying you are back online" instruction the
-      // way claude-code does, so fire the back-online ping directly from the
-      // daemon for that runtime. Skipped on handoff restart — the agent
-      // sends its own contextual "back — ..." reply in that case.
-      this.maybeSendCodexBootNotification();
+      this.maybeSendRuntimeLifecycleNotification();
 
       // Start session timer
       this.startSessionTimer();
@@ -247,6 +237,12 @@ export class AgentProcess {
           // and flips _alive=false. Skipping the 6s Claude-REPL dance makes
           // `bus hard-restart` feel responsive instead of appearing to do
           // nothing for several seconds.
+        } else if (this.config.runtime === 'opencode') {
+          // OpenCode runs as a TUI. It does not use Claude Code's `/exit`
+          // command contract, so stop with Ctrl-C and then let the shared
+          // liveness check below kill the PTY if it is still running.
+          pty.write('\x03'); // Ctrl-C
+          await sleep(1000);
         } else {
           // BUG-032 fix: use CRLF (not lone CR) so Claude Code's REPL actually
           // recognizes the /exit line as a complete command, AND wait long
@@ -309,12 +305,13 @@ export class AgentProcess {
    */
   async sessionRefresh(): Promise<void> {
     this.log('Session refresh (--continue restart)');
-    // Write .session-refresh marker BEFORE stop() so the SessionEnd crash-alert
-    // hook (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
-    // scheduled session refresh rather than an unexpected crash. The hook's marker
-    // handler + quiet-suppression set + message switch were all wired for this type,
-    // but no writer existed — every --continue rollover at the session-time cap
-    // surfaced as a false-positive 'crash' on chief/analyst + the crashes.log file.
+    // Write .session-refresh marker so the SessionEnd crash-alert hook
+    // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
+    // session refresh rather than a crash. The hook's marker handler +
+    // quiet-suppression set + message switch were all wired for this type,
+    // but no writer existed — every --continue rollover at the session-time
+    // cap surfaced as a false-positive 'crash' on chief/analyst + the
+    // crashes.log file.
     try {
       const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
       writeFileSync(
@@ -348,7 +345,13 @@ export class AgentProcess {
       return { ok: false, code: 'DEDUPED', message: `inject for "${this.name}" deduped — content matches MessageDedup hash window` };
     }
 
-    injectMessage((data) => this.pty?.write(data), content);
+    if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
+      this.pty.injectMessage(content);
+    } else {
+      // CodexAppServerPTY intentionally models stdin writes itself and does not
+      // inherit AgentPTY. Feed it through the same write path used historically.
+      injectMessageIntoPty((data) => this.pty?.write(data), content);
+    }
     return { ok: true };
   }
 
@@ -592,59 +595,6 @@ export class AgentProcess {
       return;
     }
 
-    // Rapid-continue-crash loop detection. A --continue session that starts
-    // into a near-full context can crash within seconds; the daemon then
-    // restarts with --continue again into the same bloated history and loops.
-    // If we see RAPID_CONTINUE_MAX such rapid exits within the rolling window,
-    // arm .force-fresh so the NEXT start() discards conversation history and
-    // breaks the loop. Unlike image-poison recovery, we do NOT return here —
-    // we fall through to normal crash recovery (backoff + restart); the only
-    // change is that the next start uses fresh context instead of --continue.
-    const RAPID_CONTINUE_THRESHOLD_MS = 5 * 60 * 1000;
-    const RAPID_CONTINUE_WINDOW_MS = 10 * 60 * 1000;
-    const RAPID_CONTINUE_MAX = 3;
-
-    if (this.lastStartWasContinue && this.sessionStart) {
-      const sessionDurationMs = Date.now() - this.sessionStart.getTime();
-      if (sessionDurationMs < RAPID_CONTINUE_THRESHOLD_MS) {
-        const now = Date.now();
-        this.rapidContinueTimestamps.push(now);
-        this.rapidContinueTimestamps = this.rapidContinueTimestamps.filter(
-          (ts) => now - ts <= RAPID_CONTINUE_WINDOW_MS,
-        );
-        if (this.rapidContinueTimestamps.length >= RAPID_CONTINUE_MAX) {
-          this.log(
-            "Rapid-continue-crash loop detected: " + this.rapidContinueTimestamps.length +
-            " rapid exits in " + (RAPID_CONTINUE_WINDOW_MS / 60000) + "min window — arming .force-fresh"
-          );
-          this.rapidContinueTimestamps = [];
-          this.armForceFresh("rapid-continue-crash auto-recovery");
-        }
-      }
-    }
-
-    // Anthropic rate-limit detection. If the agent's stdout tail shows a
-    // rate-limit signature (5h / weekly / overloaded / "used N% of your..."),
-    // do NOT count this as a crash — the agent didn't fail, the API quota
-    // closed. Counting these against maxCrashesPerDay halts agents during
-    // rate-limit storms; using exponential 5s/10s/20s/.../5min backoff slams
-    // the API while it's already over budget. Use the long retry window
-    // (60min) so we poll once per hour for the quota window to reopen.
-    // hook-crash-alert.ts uses the same detector to suppress the 🚨 alert.
-    const stdoutLogPath = join(this.env.ctxRoot, 'logs', this.name, 'stdout.log');
-    if (detectRateLimitInLog(stdoutLogPath)) {
-      this.log(`Rate-limit detected in stdout — pausing for ${RATE_LIMIT_RETRY_MS / 60000}min before retry (NOT counted as crash)`);
-      this.appendCrashToRestartsLog(exitCode, RATE_LIMIT_RETRY_MS, 'RATE-LIMITED');
-      this.status = 'crashed';
-      this.notifyStatusChange();
-      setTimeout(() => {
-        if (this.status === 'crashed') {
-          this.start().catch(err => this.log(`Rate-limit retry failed: ${err}`));
-        }
-      }, RATE_LIMIT_RETRY_MS);
-      return;
-    }
-
     // CrashLoopPauser (instar-inspired): if a sliding window is configured,
     // check whether the agent is crash-looping before falling through to
     // the legacy daily counter. The window is a more precise signal than
@@ -735,6 +685,13 @@ export class AgentProcess {
       return existsSync(threadStatePath);
     }
 
+    // opencode: do not inspect Claude JSONL history. The OpencodePTY adapter
+    // writes a lightweight marker after a successful spawn; that marker is the
+    // only signal that the next boot should pass `opencode --continue`.
+    if (this.config.runtime === 'opencode') {
+      return opencodeSessionExists(this.env.ctxRoot, this.name);
+    }
+
     // Default (Claude runtime): existing conversation = JSONL files present.
     const launchDir = this.config.working_directory || this.env.agentDir;
     if (!launchDir) return false;
@@ -775,10 +732,11 @@ export class AgentProcess {
     // HANDOFF UX: the pickup message MUST be the first action after reading the handoff doc —
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
-    const handoffUxOverride = isHandoffRestart
+    const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
+    const handoffUxOverride = isHandoffRestart && shouldPromptTelegram
       ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc. CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
-    const onlineMessage = isHandoffRestart
+    const onlineMessage = isHandoffRestart || !shouldPromptTelegram
       ? ''
       : ' Send a Telegram message to the user saying you are back online.';
     return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${handoffBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
@@ -790,7 +748,14 @@ export class AgentProcess {
     const deliverablesBlock = this.buildDeliverablesBlock();
     // Session refresh (--continue) is never a handoff restart.
     this.lastSpawnWasHandoff = false;
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations. After checking inbox, send a Telegram message to the user saying you are back online.`;
+    const onlineMessage = this.shouldPromptTelegramOnlineMessage()
+      ? ' After checking inbox, send a Telegram message to the user saying you are back online.'
+      : '';
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations.${onlineMessage}`;
+  }
+
+  private shouldPromptTelegramOnlineMessage(): boolean {
+    return this.config.telegram_polling !== false && !!this.telegramApi && !!this.telegramChatId;
   }
 
   /**
@@ -853,26 +818,81 @@ export class AgentProcess {
   }
 
   /**
-   * Issue #392: send the back-online Telegram notification directly from the
-   * daemon when the codex-app-server runtime spawns. The boot prompt's inline
-   * "Send a Telegram message..." instruction reaches the codex thread but is
-   * not executed reliably as a tool call, leaving James without the standard
-   * post-restart notification claude-code peers send.
+   * Issue #392 / OpenCode parity: send lifecycle Telegram directly from the
+   * daemon for runtimes whose startup/continue prompts are not reliable enough
+   * to guarantee a user-visible notification.
+   *
+   * codex-app-server: the boot prompt's inline "Send a Telegram message..."
+   * instruction reaches the codex thread but is not executed reliably as a tool
+   * call, leaving James without the standard post-restart notification
+   * claude-code peers send.
+   *
+   * opencode: the prompt is injected into the persistent TUI after startup.
+   * Real production evidence showed an OpenCode --continue restart updated the
+   * process/session markers but emitted no Telegram message, so lifecycle
+   * visibility must be daemon-owned just like Codex.
+   *
+   * Two distinct notifications, mirroring what a claude-code agent emits:
+   *  - msg1 (planned-restart lifecycle, "🔄 <agent> restarted (planned): ..."):
+   *    for claude this is sent by hook-crash-alert.ts on PTY exit. codex/opencode
+   *    runtimes do NOT run Claude Code hooks, so on a handoff restart the daemon
+   *    emits the same notification here for parity (James saw msg1 only for
+   *    claude agents otherwise). Format mirrors hook-crash-alert.ts:394-397.
+   *  - msg2 (back-online / "back — ..." summary): codex reliably self-sends its
+   *    own contextual reply via the boot prompt; opencode (deepseek) does NOT, so
+   *    the daemon sends a handoff-flavored back-online ping for opencode only.
    *
    * Skipped when:
-   *  - runtime is anything other than codex-app-server (claude-code/hermes
-   *    already emit this via the prompt),
-   *  - the most recent prompt was built for a handoff restart (the agent
-   *    sends its own contextual "back — ..." reply in that case),
-   *  - no Telegram handle has been wired (no chat_id configured).
+   *  - runtime is anything other than codex-app-server/opencode (claude-code
+   *    and hermes already emit both via the hook + prompt),
+   *  - Telegram is disabled or no Telegram handle has been wired.
    */
-  private maybeSendCodexBootNotification(): void {
-    if (this.config.runtime !== 'codex-app-server') return;
-    if (this.lastSpawnWasHandoff) return;
-    if (!this.telegramApi || !this.telegramChatId) return;
-    this.telegramApi
-      .sendMessage(this.telegramChatId, `Agent ${this.name} is back online`)
-      .catch(() => { /* non-fatal: notification is observability only */ });
+  private maybeSendRuntimeLifecycleNotification(): void {
+    if (this.config.runtime !== 'codex-app-server' && this.config.runtime !== 'opencode') return;
+    if (!this.shouldPromptTelegramOnlineMessage()) return;
+    const telegramApi = this.telegramApi;
+    const telegramChatId = this.telegramChatId;
+    if (!telegramApi || !telegramChatId) return;
+    const send = (text: string) =>
+      telegramApi
+        .sendMessage(telegramChatId, text)
+        .catch(() => { /* non-fatal: notification is observability only */ });
+
+    if (this.lastSpawnWasHandoff) {
+      // msg1: planned-restart lifecycle notif, hook parity for runtimes without
+      // Claude Code hooks. Both codex and opencode were missing this.
+      send(this.buildPlannedRestartNotification());
+      // msg2 ("back — ...") is self-sent by the agent via the handoff boot prompt
+      // (agent-process.ts buildStartupPrompt handoffUxOverride) for BOTH codex and
+      // opencode — opencode now reliably honors it. The daemon used to send an
+      // "Agent X is back online (context handoff)" substitute for opencode, but
+      // that produced a redundant 3rd message on top of the self-sent "back —".
+      // Removed: msg1 (daemon) + msg2 (agent self-send) = clean 2-message pattern.
+      return;
+    }
+
+    // Non-handoff restart (crash recovery / config reload): both runtimes need
+    // the daemon-emitted back-online ping.
+    send(`Agent ${this.name} is back online`);
+  }
+
+  /**
+   * Build the planned-restart lifecycle notification (msg1) for codex/opencode,
+   * reading the reason from the `.restart-planned` marker and matching the
+   * hook-crash-alert.ts:394-397 format string exactly so codex/opencode parity
+   * is byte-identical to what claude agents emit via the hook.
+   */
+  private buildPlannedRestartNotification(): string {
+    let reason = '';
+    try {
+      const markerPath = join(this.env.ctxRoot, 'state', this.name, '.restart-planned');
+      if (existsSync(markerPath)) {
+        reason = readFileSync(markerPath, 'utf-8').trim();
+      }
+    } catch { /* non-fatal — fall through to generic reason */ }
+    return reason.startsWith('CONTEXT-FORCE-RESTART')
+      ? `🔄 ${this.name} restarting with memory`
+      : `🔄 ${this.name} restarted (planned): ${reason || 'no reason given'}`;
   }
 
   private startSessionTimer(): void {

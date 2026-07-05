@@ -19,7 +19,6 @@ import {
   IconTarget,
   IconMessages,
   IconNotes,
-  IconChartBar,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';

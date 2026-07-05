@@ -75,10 +75,6 @@ export async function middleware(request: NextRequest) {
 
   // Allow public paths
   // Security (H7): SSE endpoints require ?token=<jwt> auth — removed from public whitelist
-  // /api/pa-account is intentionally public: read-only PA account metrics for NT8 MonkeyAttackMonitor
-  // /api/nt8/state-update, /api/nt8/pending-commands, /api/nt8/command-ack, /api/nt8/events (POST) are public:
-  //   inbound from VPS relay/watchdog which cannot send auth headers
-  // /api/nt8/state, /api/nt8/command, /api/nt8/stream: authenticated (dashboard users only)
   // GAP-0034: /api/workflows/health is an unauthenticated health probe — must be
   // reachable from monitoring contexts (load balancers, watcher crons, external
   // watchdogs) without requiring a session cookie. Auth-gating defeats the purpose.
@@ -92,9 +88,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api/nt8/events') ||
     pathname.startsWith('/_next') ||
     pathname === '/favicon.ico' ||
-    pathname === '/api/workflows/health' ||
-    pathname.startsWith('/api/sows') ||
-    pathname.startsWith('/api/deliverables')
+    pathname === '/api/workflows/health'
   ) {
     const response = NextResponse.next();
     response.headers.set('Access-Control-Allow-Origin', corsOrigin);

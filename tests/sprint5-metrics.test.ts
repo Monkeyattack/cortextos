@@ -8,7 +8,6 @@ import {
   storeUsageData,
   collectTelegramCommands,
   registerTelegramCommands,
-  TELEGRAM_MAX_COMMANDS,
 } from '../src/bus/metrics.js';
 
 describe('Sprint 5: Observability & Metrics', () => {
@@ -460,28 +459,6 @@ describe('Sprint 5: Observability & Metrics', () => {
       expect(result.status).toBe('error');
       expect(result.error).toBe('Bad Request');
       expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
-
-    // Telegram's setMyCommands rejects >100 commands with BOT_COMMANDS_TOO_MUCH.
-    // The framework catalog exceeds that, so the combined list must be capped
-    // before the API call rather than failing registration outright.
-    it('caps the list at Telegram\'s 100-command limit and reports the dropped count', async () => {
-      const many = Array.from({ length: 150 }, (_, i) => ({
-        command: `cmd${i}`,
-        description: `Command ${i}`,
-      }));
-      const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: true }) });
-      global.fetch = fetchMock as unknown as typeof fetch;
-
-      const result = await registerTelegramCommands('token', many);
-
-      expect(result.status).toBe('ok');
-      expect(result.count).toBe(TELEGRAM_MAX_COMMANDS);
-      expect(result.dropped).toBe(150 - TELEGRAM_MAX_COMMANDS);
-      // The agent-local commands are scanned first, so the kept slice is the head.
-      const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
-      expect(sentBody.commands).toHaveLength(TELEGRAM_MAX_COMMANDS);
-      expect(sentBody.commands[0].command).toBe('cmd0');
     });
   });
 });

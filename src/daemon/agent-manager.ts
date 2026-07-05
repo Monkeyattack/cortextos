@@ -23,7 +23,7 @@ type LogFn = (msg: string) => void;
  * Manages all agents in a cortextOS instance.
  */
 export class AgentManager {
-  private agents: Map<string, { process: AgentProcess; checker: FastChecker; poller?: TelegramPoller; activityPoller?: TelegramPoller; taskmasterPoller?: TelegramPoller; telegramRejectCount?: number; telegramLastRejectAlertAt?: number }> = new Map();
+  private agents: Map<string, { process: AgentProcess; checker: FastChecker; poller?: TelegramPoller; activityPoller?: TelegramPoller; telegramRejectCount?: number; telegramLastRejectAlertAt?: number }> = new Map();
   private workers: Map<string, WorkerProcess> = new Map();
   /** Daemon-level cron scheduler registry: one CronScheduler per enabled agent. */
   private cronSchedulers: Map<string, CronScheduler> = new Map();
@@ -38,6 +38,15 @@ export class AgentManager {
   // across the whole instance (started when the org orchestrator starts) so
   // decisions sent via TASKMASTER_BOT_TOKEN are answered by a single poller.
   private taskmasterPoller?: TelegramPoller;
+
+  // Set true at construction time if any agent in state/ has a stale
+  // .daemon-crashed marker, meaning the previous daemon process died
+  // abruptly. Used by startAgent() to downgrade the BUG-011 regression
+  // alarm to an info log in the post-crash overlap case (PR #11 only
+  // closed the in-flight stop/start race; crash-restart can legitimately
+  // see overlapping registry state). Cleared after discoverAndStart()
+  // finishes so the next clean restart starts from a known-good baseline.
+  private daemonJustCrashed: boolean = false;
 
   // Set true at construction time if any agent in state/ has a stale
   // .daemon-crashed marker, meaning the previous daemon process died
@@ -337,40 +346,6 @@ export class AgentManager {
         botToken = undefined;
       }
 
-      // Validate BOT_TOKEN uniqueness across all agents. Shared tokens cause
-      // Telegram identity confusion — messages from different agents look identical.
-      if (botToken) {
-        const orgsRoot = join(this.frameworkRoot, 'orgs');
-        if (existsSync(orgsRoot)) {
-          try {
-            const orgs = readdirSync(orgsRoot, { withFileTypes: true }).filter(d => d.isDirectory());
-            for (const org of orgs) {
-              const agentsRoot = join(orgsRoot, org.name, 'agents');
-              if (!existsSync(agentsRoot)) continue;
-              const peers = readdirSync(agentsRoot, { withFileTypes: true })
-                .filter(d => d.isDirectory() && d.name !== name);
-              for (const peer of peers) {
-                const peerEnv = join(agentsRoot, peer.name, '.env');
-                if (!existsSync(peerEnv)) continue;
-                try {
-                  const peerContent = readFileSync(peerEnv, 'utf-8');
-                  const peerMatch = peerContent.match(/^BOT_TOKEN=(.+)$/m);
-                  const peerToken = peerMatch?.[1]?.trim();
-                  if (peerToken && peerToken === botToken) {
-                    const msg = `DUPLICATE BOT_TOKEN: ${name} shares its Telegram bot token with agent '${peer.name}'. ` +
-                      `Messages from both agents will appear identical in Telegram. ` +
-                      `Fix: create a new bot via @BotFather and update agents/${name}/.env BOT_TOKEN.`;
-                    log(msg);
-                    console.error(`[daemon] CRITICAL: ${msg}`);
-                    botToken = undefined;
-                  }
-                } catch { /* skip unreadable peer */ }
-              }
-            }
-          } catch { /* non-fatal: best-effort check */ }
-        }
-      }
-
       // ALLOWED_USER must be one or more numeric Telegram user IDs.
       // Comma-separated for multi-user (e.g. group chats with Sam + a collaborator).
       // Whitespace tolerated; any non-numeric token rejects the whole list.
@@ -391,8 +366,6 @@ export class AgentManager {
       // whitelists their numeric user ID.
       if (botToken && !allowedUserId) {
         log(`SECURITY: BOT_TOKEN is set but ALLOWED_USER is missing. Refusing to enable Telegram. Set ALLOWED_USER to your numeric Telegram user ID in .env, or remove BOT_TOKEN to start the agent without Telegram.`);
-        // Also warn at daemon level so the operator sees it in PM2 logs even if not tailing per-agent logs.
-        console.warn(`[daemon] WARN: ${name} has BOT_TOKEN but no ALLOWED_USER — Telegram blocked. Add ALLOWED_USER=<numeric_id> to agents/${name}/.env and restart.`);
         if (chatId) {
           const alertApi = new TelegramAPI(botToken);
           alertApi.sendMessage(chatId,
@@ -473,10 +446,7 @@ export class AgentManager {
       const commands = collectTelegramCommands(scanDirs);
       registerTelegramCommands(botToken, commands).then((result) => {
         if (result.status === 'ok') {
-          const droppedNote = result.dropped
-            ? ` (${result.dropped} dropped over Telegram's 100-command cap)`
-            : '';
-          log(`Telegram commands registered (${result.count} commands)${droppedNote}`);
+          log(`Telegram commands registered (${result.count} commands)`);
         } else if (result.status !== 'empty') {
           // Surface failures instead of swallowing them silently: a failed
           // registration means the agent's slash menu is missing until the next
@@ -549,6 +519,7 @@ export class AgentManager {
 
         // Check for media messages (photo, document, voice, audio, video, video_note)
         const isMedia = !!(msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note);
+        const replyToText = buildReplyContext(msg.reply_to_message);
 
         if (isMedia && telegramApi) {
           const downloadDir = join(agentDir, 'telegram-images');
@@ -556,7 +527,7 @@ export class AgentManager {
             if (!media) {
               log('Media processing returned null - falling back to text format');
               const text = stripControlChars(msg.caption || '');
-              const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot);
+              const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
               if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
               return;
             }
@@ -574,14 +545,14 @@ export class AgentManager {
             log(`[DEBUG] media.type=${media.type} image_path=${JSON.stringify(relImagePath)} file_path=${JSON.stringify(relFilePath)}`);
             let formatted: string;
             if (media.type === 'photo') {
-              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath);
+              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath, replyToText);
             } else if (media.type === 'document') {
-              formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!);
+              formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!, replyToText);
             } else if (media.type === 'voice' || media.type === 'audio') {
-              formatted = FastChecker.formatTelegramVoiceMessage(from, effectiveChatId, relFilePath, media.duration, media.transcript);
+              formatted = FastChecker.formatTelegramVoiceMessage(from, effectiveChatId, relFilePath, media.duration, media.transcript, replyToText);
             } else {
               // video or video_note
-              formatted = FastChecker.formatTelegramVideoMessage(from, effectiveChatId, media.text, relFilePath, media.file_name || '', media.duration);
+              formatted = FastChecker.formatTelegramVideoMessage(from, effectiveChatId, media.text, relFilePath, media.file_name || '', media.duration, replyToText);
             }
 
             if (checker.isDuplicate(formatted)) {
@@ -593,7 +564,7 @@ export class AgentManager {
           }).catch((err) => {
             log(`Media processing error: ${err} - falling back to text format`);
             const text = stripControlChars(msg.caption || '');
-            const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot);
+            const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
             if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
           });
           return;
@@ -602,8 +573,6 @@ export class AgentManager {
         // Text message (non-media)
         const text = stripControlChars(msg.text || '');
         const lastSent = FastChecker.readLastSent(stateDir, effectiveChatId);
-        // Build reply context from the replied-to message.
-        const replyToText = buildReplyContext(msg.reply_to_message);
 
         const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6) ?? undefined;
         const formatted = FastChecker.formatTelegramTextMessage(
@@ -752,23 +721,7 @@ export class AgentManager {
       // — follow-up task_1776054009969_099 tracks migrating to a dedicated
       // singleton or Telegram webhook if the coupling ever causes real
       // operator pain. Non-orchestrator agents skip this entirely.
-      // Pass resolvedOrg, NOT the raw `org` param. On individual restarts
-      // (restartAgent → startAgent(name, '') with no org, plus crash /
-      // force-fresh / --continue reload paths) `org` is undefined, which made
-      // both maybeStart*Poller methods bail at their `if (!org) return;` guard —
-      // so the activity-channel AND Taskmaster decision pollers silently never
-      // came back after any restart, only after a cold discoverAndStart boot.
-      // That stranded all send-decision button taps (offset frozen for days).
-      // resolvedOrg is always defined (resolveAgentOrg falls back), so this is
-      // strictly more correct than `org` and identical on cold boot.
-      await this.maybeStartActivityChannelPoller(name, resolvedOrg, agentDir, log);
-
-      // Orchestrator-only: start the single central Taskmaster poller so
-      // decisions sent via TASKMASTER_BOT_TOKEN (from any agent in the org)
-      // are answered by one bot in one Telegram thread. Same lifecycle
-      // coupling as the activity-channel poller. No-op when the org has no
-      // TASKMASTER_BOT_TOKEN configured.
-      await this.maybeStartTaskmasterPoller(name, resolvedOrg, log);
+      await this.maybeStartActivityChannelPoller(name, org, agentDir, log);
     }
   }
 
@@ -895,115 +848,6 @@ export class AgentManager {
   }
 
   /**
-   * If this agent is the org's orchestrator AND the org has a
-   * TASKMASTER_BOT_TOKEN in orgs/{org}/secrets.env, start the single central
-   * Taskmaster poller bound to that token. Decision messages sent via
-   * `cortextos bus send-decision` are routed through the Taskmaster bot
-   * (see createDecision + cli/bus.ts), so their callbacks arrive on this bot
-   * rather than the requesting agent's own bot. The callback is matched to
-   * the owning agent via pending-decisions.json and dispatched to that
-   * agent's FastChecker.handleCallback with the Taskmaster API as override —
-   * so answerCallbackQuery + editMessageText target the right bot.
-   *
-   * Only ONE Taskmaster poller runs per instance (this.taskmasterPoller
-   * guard). Safe no-op when org missing, not orchestrator, secrets.env
-   * absent/unreadable, or TASKMASTER_BOT_TOKEN not set.
-   */
-  private async maybeStartTaskmasterPoller(
-    name: string,
-    org: string | undefined,
-    log: LogFn,
-  ): Promise<void> {
-    if (!org) return;
-    if (this.taskmasterPoller) return; // singleton — already running
-
-    const orgDir = join(this.frameworkRoot, 'orgs', org);
-
-    // Only the org's orchestrator runs the Taskmaster poller.
-    let orchestratorName: string | undefined;
-    try {
-      const contextJson = readFileSync(join(orgDir, 'context.json'), 'utf-8');
-      orchestratorName = JSON.parse(contextJson).orchestrator;
-    } catch {
-      return; // No context.json or unreadable — skip
-    }
-    if (!orchestratorName || orchestratorName !== name) return;
-
-    // Read TASKMASTER_BOT_TOKEN from orgs/{org}/secrets.env.
-    const secretsPath = join(orgDir, 'secrets.env');
-    let taskmasterBotToken: string | undefined;
-    try {
-      const content = readFileSync(secretsPath, 'utf-8');
-      const match = content.match(/^TASKMASTER_BOT_TOKEN=(.+)$/m);
-      if (match && match[1].trim()) taskmasterBotToken = match[1].trim();
-    } catch {
-      return; // secrets.env absent — silent no-op
-    }
-    if (!taskmasterBotToken) return; // not configured — no-op
-
-    const taskmasterApi = new TelegramAPI(taskmasterBotToken);
-    const stateDir = join(this.ctxRoot, 'state', name);
-    // offsetFileSuffix keeps the Taskmaster poller's offset file distinct from
-    // the primary and activity pollers sharing this stateDir.
-    const taskmasterPoller = new TelegramPoller(taskmasterApi, stateDir, 1000, 'taskmaster');
-
-    // pending-decisions.json is a single shared file at {ctxRoot}/state.
-    const decisionsPath = join(this.ctxRoot, 'state', 'pending-decisions.json');
-
-    taskmasterPoller.onCallback((query) => {
-      // callback_data is decision_<decisionId>_<optionIndex>; decisionId is
-      // itself decision_<epoch>_<rand>. Extract the decisionId to look up the
-      // owning agent.
-      const data = stripControlChars(query.data || '');
-      const match = data.match(/^decision_(decision_\d+_[a-zA-Z0-9]+)_\d+$/);
-      if (!match) {
-        log(`Taskmaster callback ignored (unknown prefix): ${data.slice(0, 40)}`);
-        return;
-      }
-      const decisionId = match[1];
-
-      // Resolve which agent owns this decision via pending-decisions.json.
-      let ownerAgent: string | undefined;
-      try {
-        const parsed = JSON.parse(readFileSync(decisionsPath, 'utf-8'));
-        if (parsed && Array.isArray(parsed.decisions)) {
-          const found = parsed.decisions.find(
-            (d: { id?: string; agent?: string }) => d.id === decisionId,
-          );
-          ownerAgent = found?.agent;
-        }
-      } catch {
-        log(`Taskmaster callback: could not read pending-decisions.json for ${decisionId}`);
-        return;
-      }
-      if (!ownerAgent) {
-        log(`Taskmaster callback: no owner agent for decision ${decisionId}`);
-        return;
-      }
-
-      const ownerEntry = this.agents.get(ownerAgent);
-      if (!ownerEntry) {
-        log(`Taskmaster callback: owner agent ${ownerAgent} not running for ${decisionId}`);
-        return;
-      }
-
-      ownerEntry.checker.handleCallback(query, taskmasterApi).catch((err) => {
-        log(`Taskmaster callback error: ${err}`);
-      });
-    });
-
-    taskmasterPoller.start().catch((err) => {
-      log(`Taskmaster poller error: ${err}`);
-    });
-
-    this.taskmasterPoller = taskmasterPoller;
-    const entry = this.agents.get(name);
-    if (entry) entry.taskmasterPoller = taskmasterPoller;
-
-    log('Taskmaster decision poller started');
-  }
-
-  /**
    * Stop a specific agent.
    */
   async stopAgent(name: string): Promise<void> {
@@ -1015,11 +859,6 @@ export class AgentManager {
 
     if (entry.poller) entry.poller.stop();
     if (entry.activityPoller) entry.activityPoller.stop();
-    if (entry.taskmasterPoller) {
-      entry.taskmasterPoller.stop();
-      // Clear the singleton guard so the next orchestrator start can re-create it.
-      if (this.taskmasterPoller === entry.taskmasterPoller) this.taskmasterPoller = undefined;
-    }
     entry.checker.stop();
     await entry.process.stop();
     this.agents.delete(name);
@@ -1461,13 +1300,20 @@ export function buildReplyContext(
   replyMsg: TelegramMessage | undefined,
 ): string | undefined {
   if (!replyMsg) return undefined;
-  if (replyMsg.text) return stripControlChars(replyMsg.text);
-  if (replyMsg.caption) return stripControlChars(replyMsg.caption);
-  if (replyMsg.video) return '[video]';
-  if (replyMsg.video_note) return '[video note]';
-  if (replyMsg.photo) return '[photo]';
-  if (replyMsg.voice) return '[voice message]';
-  if (replyMsg.audio) return '[audio]';
-  if (replyMsg.document) return `[document: ${replyMsg.document.file_name ?? 'file'}]`;
+  const parts: string[] = [];
+  if (replyMsg.text) {
+    parts.push(stripControlChars(replyMsg.text));
+  } else if (replyMsg.caption) {
+    parts.push(stripControlChars(replyMsg.caption));
+  }
+
+  if (replyMsg.document) parts.push(`[document: ${replyMsg.document.file_name ?? 'file'}]`);
+  if (replyMsg.photo) parts.push('[photo]');
+  if (replyMsg.video) parts.push('[video]');
+  if (replyMsg.video_note) parts.push('[video note]');
+  if (replyMsg.voice) parts.push('[voice message]');
+  if (replyMsg.audio) parts.push('[audio]');
+
+  if (parts.length > 0) return parts.join('\n');
   return undefined;
 }

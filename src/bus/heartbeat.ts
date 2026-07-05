@@ -100,28 +100,6 @@ export function updateHeartbeat(
 }
 
 /**
- * Touch heartbeat.json's `last_heartbeat` field without changing other fields.
- *
- * Called from logEvent() so any bus event also acts as a sign-of-life signal,
- * preventing agents that send messages or log milestones from showing STALE
- * in read-all-heartbeats just because they didn't explicitly call
- * `update-heartbeat`. No-op when heartbeat.json doesn't exist yet (don't
- * synthesize an empty one).
- */
-export function touchHeartbeat(paths: BusPaths, agentName: string): void {
-  const stateAgentDir = join(paths.ctxRoot, 'state', agentName);
-  const hbPath = join(stateAgentDir, 'heartbeat.json');
-  if (!existsSync(hbPath)) return;
-  try {
-    const existing = JSON.parse(readFileSync(hbPath, 'utf-8')) as Heartbeat;
-    existing.last_heartbeat = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-    atomicWriteSync(hbPath, JSON.stringify(existing));
-  } catch {
-    // If the file is corrupt or unreadable, don't crash the caller.
-  }
-}
-
-/**
  * Detect day/night mode based on timezone.
  * Day: 8:00 - 22:00, Night: 22:00 - 8:00
  */

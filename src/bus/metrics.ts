@@ -532,14 +532,6 @@ export async function registerTelegramCommands(
     return { status: 'empty', count: 0, commands: [], error: 'No commands found to register' };
   }
 
-  // Enforce Telegram's hard 100-command cap. collectTelegramCommands scans the
-  // agent dir before the framework root, so the kept slice favours the agent's
-  // own commands and drops the framework-catalog overflow that would otherwise
-  // trigger BOT_COMMANDS_TOO_MUCH (registration would fail entirely, leaving the
-  // slash menu empty).
-  const dropped = Math.max(0, commands.length - TELEGRAM_MAX_COMMANDS);
-  const sendCommands = dropped > 0 ? commands.slice(0, TELEGRAM_MAX_COMMANDS) : commands;
-
   const totalAttempts = Math.max(1, attempts);
   let lastError = 'Failed to register commands with Telegram';
 
@@ -551,12 +543,12 @@ export async function registerTelegramCommands(
       const response = await fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commands: sendCommands, scope: { type: 'all_private_chats' } }),
+        body: JSON.stringify({ commands, scope: { type: 'all_private_chats' } }),
       });
 
       const data = await response.json() as { ok: boolean; description?: string };
       if (data.ok) {
-        return { status: 'ok', count: sendCommands.length, commands: sendCommands, dropped };
+        return { status: 'ok', count: commands.length, commands };
       }
       lastError = data.description || 'Failed to register commands with Telegram';
     } catch (err) {
@@ -569,7 +561,7 @@ export async function registerTelegramCommands(
     }
   }
 
-  return { status: 'error', count: 0, commands: sendCommands, error: lastError, dropped };
+  return { status: 'error', count: 0, commands, error: lastError };
 }
 
 // --- Internal helpers ---

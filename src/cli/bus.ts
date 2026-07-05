@@ -21,7 +21,7 @@ import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
-import { resolveEnv } from '../utils/env.js';
+import { resolveEnv, resolveTargetAgentDir } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
@@ -64,29 +64,6 @@ function checkDeliverableRequirement(taskId: string, frameworkRoot: string, org:
   }
 
   return null;
-}
-
-/**
- * Resolve an agent directory by name, searching the current org first then
- * all other orgs. Fixes cross-org gather-context/list-experiments: analyst
- * (prop-firm-admin) calling --agent lit_agent (creative-studio) used to
- * return empty experiments[] because it looked in the wrong org.
- */
-function resolveAgentDir(frameworkRoot: string, currentOrg: string, agentName: string): string {
-  const primary = join(frameworkRoot, 'orgs', currentOrg, 'agents', agentName);
-  if (existsSync(primary)) return primary;
-  const orgsDir = join(frameworkRoot, 'orgs');
-  if (existsSync(orgsDir)) {
-    try {
-      const { readdirSync } = require('fs');
-      for (const org of readdirSync(orgsDir) as string[]) {
-        if (org === currentOrg) continue;
-        const candidate = join(orgsDir, org, 'agents', agentName);
-        if (existsSync(candidate)) return candidate;
-      }
-    } catch { /* fall through to primary */ }
-  }
-  return primary;
 }
 
 export const busCommand = new Command('bus')
@@ -178,27 +155,10 @@ busCommand
   .option('--needs-approval', 'Require human approval before execution')
   .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
   .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
-  .option('--meta <json>', 'Structured metadata as a JSON object (e.g. \'{"triggered_by_event_id":"<uuid>"}\')')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string; meta?: string }) => {
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
-    let metadata: Record<string, unknown> | undefined;
-    if (opts.meta) {
-      try {
-        const parsed = JSON.parse(opts.meta);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          metadata = parsed as Record<string, unknown>;
-        } else {
-          console.error('--meta must be a JSON object');
-          process.exit(1);
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`--meta is not valid JSON: ${msg}`);
-        process.exit(1);
-      }
-    }
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
       assignee: opts.assignee,
@@ -207,7 +167,6 @@ busCommand
       needsApproval: opts.needsApproval ?? false,
       blockedBy: parseList(opts.blockedBy),
       blocks: parseList(opts.blocks),
-      metadata,
     });
     console.log(taskId);
     // Auto-notify assignee so the task is visible immediately (issue #78)
@@ -861,7 +820,24 @@ busCommand
   .option('--cycle <name>', 'Cycle name')
   .action((action: string, agent: string, opts: { metric?: string; metricType?: string; surface?: string; direction?: string; window?: string; measurement?: string; loopInterval?: string; enabled?: string; cycle?: string }) => {
     const env = resolveEnv();
-    const agentDir = env.agentDir || process.cwd();
+    // Cycles live in the TARGET agent's experiments/config.json — the file
+    // the autoresearch skill reads in that agent's session. Writing to the
+    // caller's dir instead silently created a second registry the target
+    // never reads.
+    let agentDir: string | null = null;
+    try {
+      agentDir = resolveTargetAgentDir(env, agent);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exit(1);
+    }
+    if (!agentDir && agent === env.agentName) {
+      agentDir = env.agentDir || process.cwd();
+    }
+    if (!agentDir) {
+      console.error(`Cannot resolve agent directory for '${agent}'. Cycles are stored in the target agent's experiments/config.json — check the agent name.`);
+      process.exit(1);
+    }
     if (opts.direction && opts.direction !== 'higher' && opts.direction !== 'lower') {
       console.error(`Invalid --direction '${opts.direction}'. Must be 'higher' or 'lower'`);
       process.exit(1);
@@ -2596,16 +2572,6 @@ busCommand
   .action(() => runHook('hook-idle-flag'));
 
 busCommand
-  .command('hook-session-start')
-  .description('SessionStart hook: heartbeat update + memory entry + inbox check + event log')
-  .action(() => runHook('hook-session-start'));
-
-busCommand
-  .command('hook-session-end')
-  .description('SessionEnd hook: memory capture + event log for session persistence')
-  .action(() => runHook('hook-session-end'));
-
-busCommand
   .command('hook-loop-detector')
   .description('PreToolUse hook: detects and blocks repeated tool loops (same-args repetition + ping-pong alternation)')
   .action(() => runHook('hook-loop-detector'));
@@ -2920,65 +2886,6 @@ busCommand
     if (!opts.dryRun && patched > 0) {
       console.log('\nRestart affected agents to apply the new settings:');
       console.log('  cortextos restart <agent-name>');
-    }
-  });
-
-busCommand
-  .command('fetch-url')
-  .description('Fetch a URL and print the response body — lets agents make HTTP requests without needing curl')
-  .argument('<url>', 'URL to fetch')
-  .option('-X, --method <method>', 'HTTP method', 'GET')
-  .option('-H, --header <header...>', 'Request headers in "Key: Value" format')
-  .option('-d, --data <body>', 'Request body (string or JSON)')
-  .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
-  .option('--status-only', 'Print only the HTTP status code')
-  .option('--json', 'Parse and pretty-print JSON response')
-  .action(async (url: string, opts: { method: string; header?: string[]; data?: string; timeout: string; statusOnly?: boolean; json?: boolean }) => {
-    const headers: Record<string, string> = {};
-    for (const h of (opts.header ?? [])) {
-      const idx = h.indexOf(':');
-      if (idx !== -1) headers[h.slice(0, idx).trim()] = h.slice(idx + 1).trim();
-    }
-    if (opts.data && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), parseInt(opts.timeout, 10));
-
-    try {
-      const res = await fetch(url, {
-        method: opts.method.toUpperCase(),
-        headers,
-        body: opts.data ?? undefined,
-        signal: controller.signal,
-      } as RequestInit);
-
-      clearTimeout(timer);
-
-      if (opts.statusOnly) {
-        console.log(res.status);
-        return;
-      }
-
-      const text = await res.text();
-      if (opts.json) {
-        try {
-          console.log(JSON.stringify(JSON.parse(text), null, 2));
-        } catch {
-          console.log(text);
-        }
-      } else {
-        console.log(text);
-      }
-
-      if (!res.ok) process.exit(1);
-    } catch (err: any) {
-      clearTimeout(timer);
-      if (err.name === 'AbortError') {
-        console.error(`fetch-url: request timed out after ${opts.timeout}ms`);
-      } else {
-        console.error(`fetch-url: ${err.message ?? err}`);
-      }
-      process.exit(1);
     }
   });
 
