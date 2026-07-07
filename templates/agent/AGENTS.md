@@ -84,11 +84,13 @@ MEMEOF
 
 Claude Code agents track context window usage through the `hook-context-status.ts` status-line bridge, which writes `state/<agent>/context_status.json`. The daemon's FastChecker reads that file on every poll to manage the handoff lifecycle. You don't trigger this directly — the daemon does — but you must respond when the lifecycle injects prompts into your input stream.
 
+**IMPORTANT:** the harness summarizes context in-process, but that summary is LOST when the daemon starts a FRESH process at handoff. Our daemon handoff is the authoritative mechanism — you MUST obey the injected `[CONTEXT HANDOFF REQUIRED]` line even though the harness says context is handled automatically. The harness note about not needing to wrap up early or hand off mid-task does NOT apply to this daemon lifecycle.
+
 **Three thresholds, three behaviours:**
 
 | Tier | When | What you see | What you do |
 |---|---|---|---|
-| Tier 1 — warning | usage >= `ctx_warning_threshold` (default 30%) | Injected line: `[CONTEXT] Window at NN%. Handoff triggers at HH%.` | Wrap up the current sub-task; avoid starting large new work. No restart yet. |
+| Tier 1 — warning | usage >= `ctx_warning_threshold` (default 30%) | Injected line: `[CONTEXT] Window at NN%. Handoff triggers at HH%.` | Informational only — keep working normally, full scope. Do NOT prematurely wrap up or avoid new work; the window is fine until Tier 2 (the harness auto-compacts anyway). No restart yet. |
 | Tier 2 — handoff | usage >= `ctx_handoff_threshold` (default 60%) | Injected line: `[CONTEXT HANDOFF REQUIRED] Context is at NN%. Write a handoff document to memory/handoffs/handoff-<ts>.md ...` followed by an absolute target path | Write the handoff doc to that exact path with these sections: `## Current Tasks`, `## Next Actions`, `## Active Crons`, `## Key Context`, `## Files Modified This Session`. Then run: `cortextos bus hard-restart --reason "context handoff at NN%" --handoff-doc <absolute path>`. |
 | Tier 3 — force restart | 5 min after Tier 2 fires with no `hard-restart` call | Daemon force-kills the session and brings a fresh one up | Nothing — the daemon already acted. On the next session start, resume from the handoff doc if one was found. |
 
