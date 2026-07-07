@@ -2421,7 +2421,7 @@ busCommand
     agentArg: string | undefined,
     opts: { apply?: boolean; json?: boolean },
   ) => {
-    const { scanAgentDir, groupMatchesByFile } =
+    const { scanAgentDir } =
       await import('../utils/cron-teaching-scanner.js');
     const env = resolveEnv();
     const frameworkRoot = env.frameworkRoot || process.cwd();
@@ -2519,7 +2519,12 @@ busCommand
       if (result.skippedSentinelFiles.length > 0) {
         console.log(`  (skipped ${result.skippedSentinelFiles.length} sentinel-marked file(s): ${result.skippedSentinelFiles.map((f) => f.replace(result.agentDir + '/', '')).join(', ')})`);
       }
-      const grouped = groupMatchesByFile(result.matches);
+      const grouped = result.matches.reduce((m, x) => {
+        const a = m.get(x.file) ?? [];
+        a.push(x);
+        m.set(x.file, a);
+        return m;
+      }, new Map<string, (typeof result.matches)[number][]>());
       for (const [file, matches] of grouped) {
         const rel = file.replace(result.agentDir + '/', '');
         console.log(`\n  ${rel}`);

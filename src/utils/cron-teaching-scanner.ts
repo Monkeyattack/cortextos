@@ -254,13 +254,3 @@ export function scanAgentDir(
   };
 }
 
-/** Group matches by file for readable reporting. */
-export function groupMatchesByFile(matches: ScannerMatch[]): Map<string, ScannerMatch[]> {
-  const out = new Map<string, ScannerMatch[]>();
-  for (const m of matches) {
-    const arr = out.get(m.file) ?? [];
-    arr.push(m);
-    out.set(m.file, arr);
-  }
-  return out;
-}

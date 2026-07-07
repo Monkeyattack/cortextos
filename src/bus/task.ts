@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync, unlin
 import { join } from 'path';
 import type { Task, Priority, TaskStatus, BusPaths, StaleTaskReport, ArchiveReport } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
-import { randomDigits } from '../utils/random.js';
+import { randomString } from '../utils/random.js';
 import { validatePriority, validateTaskId } from '../utils/validate.js';
 import { logEvent } from './event.js';
 
@@ -43,7 +43,7 @@ export function createTask(
   // Two createTask calls in the same ms with a 3-digit suffix collided in CI
   // (run 25618845172), making the new task's id equal to its declared blocker
   // and tripping detectCycleOrThrow with "X ultimately blocks itself via X".
-  const rand = randomDigits(8);
+  const rand = randomString(8, '0123456789');
   const taskId = `task_${epoch}_${rand}`;
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 

@@ -88,15 +88,6 @@ export function validateModel(model: string): void {
   }
 }
 
-export function isValidJson(str: string): boolean {
-  try {
-    JSON.parse(str);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Strip terminal control sequences and non-printable characters from external input.
  * Applied to all inbound Telegram text, captions, and callback data before PTY injection.

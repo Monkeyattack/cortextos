@@ -3,7 +3,7 @@ import { join } from 'path';
 import type { EventCategory, EventSeverity, BusPaths, Heartbeat } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { randomString } from '../utils/random.js';
-import { validateEventCategory, validateEventSeverity, isValidJson } from '../utils/validate.js';
+import { validateEventCategory, validateEventSeverity } from '../utils/validate.js';
 
 /**
  * Log a structured event. Appends JSONL line to daily event file.
@@ -35,9 +35,9 @@ export function logEvent(
   // Parse metadata if it's a string
   let meta: Record<string, unknown> = {};
   if (typeof metadata === 'string') {
-    if (isValidJson(metadata)) {
-      meta = JSON.parse(metadata);
-    }
+    let parsedMetadata: Record<string, unknown> | undefined;
+    try { parsedMetadata = JSON.parse(metadata); } catch { /* not valid JSON */ }
+    if (parsedMetadata) { meta = parsedMetadata; }
   } else if (metadata) {
     meta = metadata;
   }
