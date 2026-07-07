@@ -174,6 +174,8 @@ Produce all 6 deliverables (or the subset requested). Each is written to disk, m
 
 ### Deliverable 1 — Deal Book (markdown)
 
+> **SECTION CONTRACT + VERIFICATION GATE (BINDING, added 2026-07-06):** the canonical section shape is now the 12-section contract in `orgs/prop-firm-admin/knowledge/deal-flow-hardening/DRAFT_dealbook_section_contract.md` — it EXTENDS the list below with: §2 Real-Estate Strip as a HARD FIRST-ORDER step (no multiple judged off an RE-inclusive ask anywhere in the book; owner-occupied → market-rent-adjusted SDE), §6 Add-Back Scrutiny (every add-back classified DEFENSIBLE/AGGRESSIVE/UNVERIFIABLE + Scrubbed SDE feeding the bear case), §8 THREE value cases (bull/normalized/bear, explicit assumptions, DSCR each), and §11 Verdict that is **INVALID without BOTH flip-to-PURSUE and flip-to-PASS conditions** (concrete, diligence-checkable). Before minting/sending, run the contract's **13-point verification gate (G1–G13, all-BLOCK)** — a book delivers only on a clean 13/13, including the G12 internal-consistency sweep (same figure means the same thing in every section). Dispatch prompts need only say: "Produce the deal book per the section contract; run the verification gate; deliver only on 13/13."
+
 **Sections in order (MANDATORY):**
 ```
 # Deal Book: [Business Name]

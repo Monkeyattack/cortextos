@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
+import { getOverdueReminders } from '../bus/reminders.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
@@ -54,6 +55,9 @@ export class FastChecker {
 
   // Persistent dedup: message hashes to prevent duplicate delivery
   private seenHashes: Set<string> = new Set();
+
+  // Reminder IDs already injected this session (avoid re-injecting each cycle)
+  private injectedReminderIds: Set<string> = new Set();
   private dedupFilePath: string = '';
 
   // SIGUSR1 wake: resolve to immediately wake from sleep
@@ -216,6 +220,16 @@ export class FastChecker {
     for (const msg of inboxMessages) {
       messageBlock += this.formatInboxMessage(msg);
       ackIds.push(msg.id);
+    }
+
+    // Check overdue persistent reminders (mid-session delivery). Do NOT
+    // auto-ack — the agent must ack, matching the boot-path behaviour.
+    const overdueReminders = getOverdueReminders(this.paths);
+    for (const reminder of overdueReminders) {
+      if (!this.injectedReminderIds.has(reminder.id)) {
+        this.injectedReminderIds.add(reminder.id);
+        messageBlock += `\n[REMINDER OVERDUE] ${reminder.id} (due ${reminder.fire_at}): ${reminder.prompt}\nHandle this reminder, then run: cortextos bus ack-reminder ${reminder.id}\n`;
+      }
     }
 
     // Inject if there's anything

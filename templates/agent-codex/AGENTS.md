@@ -100,11 +100,13 @@ Run these steps before any restart (hard or soft) and on context exhaustion.
 
 Codex agents track context window usage from `thread/tokenUsage/updated` events emitted by codex-app-server. The PTY converts each event into a `state/<agent>/context_status.json` file, and the daemon's FastChecker reads that file on every poll to manage the handoff lifecycle. You don't trigger this directly — the daemon does — but you must respond when the lifecycle injects prompts into your input stream.
 
+**IMPORTANT:** any in-process context summary your runtime keeps is LOST when the daemon starts a FRESH process at handoff. The daemon handoff is the authoritative mechanism — you MUST obey the injected `[CONTEXT HANDOFF REQUIRED]` line and write the handoff doc; do not rely on any automatic in-process summary in its place.
+
 **Three thresholds, three behaviours:**
 
 | Tier | When | What you see | What you do |
 |---|---|---|---|
-| Tier 1 — warning | usage ≥ `ctx_warning_threshold` (default 70%) | Injected line: `[CONTEXT] Window at NN%. Handoff triggers at HH%.` | Wrap up the current sub-task; avoid starting large new work. No restart yet. |
+| Tier 1 — warning | usage ≥ `ctx_warning_threshold` (default 70%) | Injected line: `[CONTEXT] Window at NN%. Handoff triggers at HH%.` | Informational only — keep working normally, full scope. Do NOT prematurely wrap up or avoid new work; the window is fine until Tier 2. No restart yet. |
 | Tier 2 — handoff | usage ≥ `ctx_handoff_threshold` (default 80%) | Injected line: `[CONTEXT HANDOFF REQUIRED] Context is at NN%. Write a handoff document to memory/handoffs/handoff-<ts>.md ...` followed by an absolute target path | Write the handoff doc to that exact path with the five required sections (`## Current Tasks`, `## Next Actions`, `## Active Crons`, `## Key Context`, `## Files Modified This Session`), then run `cortextos bus hard-restart --reason "context handoff at NN%" --handoff-doc <absolute path>`. Do NOT skip writing the doc. |
 | Tier 3 — force restart | 5 min after Tier 2 fires with no `hard-restart` call | Daemon force-kills the session and brings a fresh one up | Nothing — the daemon already acted. On the next session start, you will resume via the handoff doc the daemon attached. |
 
