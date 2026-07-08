@@ -22,6 +22,7 @@ export class TelegramPoller {
   private callbackHandlers: CallbackHandler[] = [];
   private reactionHandlers: ReactionHandler[] = [];
   private pollInterval: number;
+  private consecutiveErrors: number = 0;
   /**
    * Why the poll loop last exited. Read by AgentManager's poller-supervisor
    * (#459 supervision-gap fix) to decide whether to restart:
@@ -118,6 +119,24 @@ export class TelegramPoller {
       }
       await sleep(this.pollInterval);
     }
+  }
+
+  /**
+   * Compute how long to wait after a poll error.
+   * - "Too Many Requests: retry after N" → honour Telegram's retry-after (min 5s).
+   * - Network failure (fetch failed, Bad Gateway, timed out) → exponential backoff
+   *   capped at 120s to survive multi-minute outages without hammering the API.
+   */
+  private computeBackoff(errMsg: string, consecutiveErrors: number): number {
+    const retryAfterMatch = errMsg.match(/retry after (\d+)/i);
+    if (retryAfterMatch) {
+      return Math.max(parseInt(retryAfterMatch[1], 10) * 1000, 5_000);
+    }
+    if (/fetch failed|Bad Gateway|timed out|ECONNREFUSED|ENOTFOUND/i.test(errMsg)) {
+      const expMs = Math.min(1_000 * Math.pow(2, consecutiveErrors - 1), 120_000);
+      return expMs;
+    }
+    return this.pollInterval;
   }
 
   /**

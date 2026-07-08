@@ -28,6 +28,28 @@ import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition } from '../types/index.js';
 
 /**
+ * Resolve an agent's directory, preferring the current org but falling back
+ * to a cross-org scan (gather-context / list-experiments accept agents from
+ * any org on the instance).
+ */
+function resolveAgentDir(frameworkRoot: string, currentOrg: string, agentName: string): string {
+  const primary = join(frameworkRoot, 'orgs', currentOrg, 'agents', agentName);
+  if (existsSync(primary)) return primary;
+  const orgsDir = join(frameworkRoot, 'orgs');
+  if (existsSync(orgsDir)) {
+    try {
+      const { readdirSync } = require('fs');
+      for (const org of readdirSync(orgsDir) as string[]) {
+        if (org === currentOrg) continue;
+        const candidate = join(orgsDir, org, 'agents', agentName);
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch { /* fall through to primary */ }
+  }
+  return primary;
+}
+
+/**
  * Check if the org requires deliverables and the task has none attached.
  * Returns an error message if the transition should be blocked, or null if allowed.
  */

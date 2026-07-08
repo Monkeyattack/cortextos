@@ -62,6 +62,7 @@ export class FastChecker {
 
   // SIGUSR1 wake: resolve to immediately wake from sleep
   private wakeResolve: (() => void) | null = null;
+  private sigusr1Handler: (() => void) | null = null;
 
   // Idle-session heartbeat watchdog
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -151,6 +152,11 @@ export class FastChecker {
         } catch (err) {
           this.log(`Poll error: ${err}`);
         }
+        // Pace the loop (SIGUSR1-interruptible). Without this the loop spins
+        // hot: N agents × a syncread-heavy pollCycle pegs the event loop,
+        // starving every daemon timer (bootstrap timeouts, Telegram poller
+        // sleeps, cron ticks) — restored after the #699 merge dropped it.
+        await this.sleepInterruptible(this.pollInterval);
       }
     } finally {
       // Always detach the SIGUSR1 handler, even if waitForBootstrap() threw or

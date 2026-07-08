@@ -48,15 +48,6 @@ export class AgentManager {
   // finishes so the next clean restart starts from a known-good baseline.
   private daemonJustCrashed: boolean = false;
 
-  // Set true at construction time if any agent in state/ has a stale
-  // .daemon-crashed marker, meaning the previous daemon process died
-  // abruptly. Used by startAgent() to downgrade the BUG-011 regression
-  // alarm to an info log in the post-crash overlap case (PR #11 only
-  // closed the in-flight stop/start race; crash-restart can legitimately
-  // see overlapping registry state). Cleared after discoverAndStart()
-  // finishes so the next clean restart starts from a known-good baseline.
-  private daemonJustCrashed: boolean = false;
-
   constructor(instanceId: string, ctxRoot: string, frameworkRoot: string, org: string) {
     this.instanceId = instanceId;
     this.ctxRoot = ctxRoot;
