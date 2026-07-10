@@ -58,19 +58,19 @@ const TICK = CronScheduler.TICK_INTERVAL_MS; // 30_000 ms
 // These tests are timezone-agnostic: rather than hardcoding UTC epoch ms
 // values (which would break on machines not set to UTC), we verify:
 //   (a) the result is a valid number,
-//   (b) the local-time fields (hour, minute, day-of-week) of the result
+//   (b) the UTC-time fields (hour, minute, day-of-week) of the result
 //       match what the cron expression requests.
 // ---------------------------------------------------------------------------
 
-/** Pull the local-time components out of an epoch-ms value. */
-function localOf(ms: number) {
+/** Pull the UTC-time components out of an epoch-ms value. */
+function utcOf(ms: number) {
   const d = new Date(ms);
   return {
-    minutes:    d.getMinutes(),
-    hours:      d.getHours(),
-    date:       d.getDate(),
-    month:      d.getMonth() + 1,
-    dayOfWeek:  d.getDay(),
+    minutes:    d.getUTCMinutes(),
+    hours:      d.getUTCHours(),
+    date:       d.getUTCDate(),
+    month:      d.getUTCMonth() + 1,
+    dayOfWeek:  d.getUTCDay(),
   };
 }
 
@@ -84,7 +84,7 @@ describe('nextFireFromCron', () => {
     expect(next).toBeGreaterThan(fromMs);
     expect(next).toBeLessThanOrEqual(fromMs + 5 * 60_000 + 60_000);
     // The minute must be a multiple of 5
-    expect(localOf(next).minutes % 5).toBe(0);
+    expect(utcOf(next).minutes % 5).toBe(0);
     // Seconds must be zero (whole minute)
     expect(next % 60_000).toBe(0);
   });
@@ -92,47 +92,47 @@ describe('nextFireFromCron', () => {
   it('computes next fire at local hour 13 for "0 13 * * *" when before 13:00 today', () => {
     // Construct a "from" time that is in local hour 12 today.
     const ref = new Date();
-    ref.setHours(12, 0, 0, 0);
+    ref.setUTCHours(12, 0, 0, 0);
     const fromMs = ref.getTime();
 
     const next = nextFireFromCron('0 13 * * *', fromMs);
     expect(next).not.toBeNaN();
 
-    const loc = localOf(next);
+    const loc = utcOf(next);
     expect(loc.hours).toBe(13);
     expect(loc.minutes).toBe(0);
     // Must be the same calendar date (still today)
-    expect(loc.date).toBe(new Date(fromMs).getDate());
+    expect(loc.date).toBe(new Date(fromMs).getUTCDate());
   });
 
   it('wraps to next day when local hour 13 has already passed today', () => {
     // Construct a "from" time in local hour 14 today.
     const ref = new Date();
-    ref.setHours(14, 0, 0, 0);
+    ref.setUTCHours(14, 0, 0, 0);
     const fromMs = ref.getTime();
 
     const next = nextFireFromCron('0 13 * * *', fromMs);
     expect(next).not.toBeNaN();
 
-    const loc = localOf(next);
+    const loc = utcOf(next);
     expect(loc.hours).toBe(13);
     expect(loc.minutes).toBe(0);
     // Must be tomorrow (date + 1), accounting for month wrap
     const expectedDate = new Date(fromMs);
-    expectedDate.setDate(expectedDate.getDate() + 1);
-    expect(loc.date).toBe(expectedDate.getDate());
+    expectedDate.setUTCDate(expectedDate.getUTCDate() + 1);
+    expect(loc.date).toBe(expectedDate.getUTCDate());
   });
 
   it('handles comma-list: "0 0,6,12,18 * * *" — picks the next matching hour', () => {
     // Set from = local 05:00 so next matching hour is 6.
     const ref = new Date();
-    ref.setHours(5, 0, 0, 0);
+    ref.setUTCHours(5, 0, 0, 0);
     const fromMs = ref.getTime();
 
     const next = nextFireFromCron('0 0,6,12,18 * * *', fromMs);
     expect(next).not.toBeNaN();
 
-    const loc = localOf(next);
+    const loc = utcOf(next);
     expect([0, 6, 12, 18]).toContain(loc.hours);
     expect(loc.minutes).toBe(0);
     expect(next).toBeGreaterThan(fromMs);
@@ -140,13 +140,13 @@ describe('nextFireFromCron', () => {
 
   it('handles ranges: "0 8-10 * * *" — fires within [8,9,10] local hours', () => {
     const ref = new Date();
-    ref.setHours(7, 59, 0, 0);
+    ref.setUTCHours(7, 59, 0, 0);
     const fromMs = ref.getTime();
 
     const next = nextFireFromCron('0 8-10 * * *', fromMs);
     expect(next).not.toBeNaN();
 
-    const loc = localOf(next);
+    const loc = utcOf(next);
     expect(loc.hours).toBeGreaterThanOrEqual(8);
     expect(loc.hours).toBeLessThanOrEqual(10);
     expect(loc.minutes).toBe(0);
@@ -158,7 +158,7 @@ describe('nextFireFromCron', () => {
     expect(next).not.toBeNaN();
     expect(next).toBeGreaterThan(fromMs);
 
-    const loc = localOf(next);
+    const loc = utcOf(next);
     expect(loc.dayOfWeek).toBe(1); // Monday
     expect(loc.hours).toBe(16);
     expect(loc.minutes).toBe(0);

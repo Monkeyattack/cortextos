@@ -19,6 +19,8 @@ module.exports = {
       args: `--instance ${INSTANCE_ID}`,
       cwd: FRAMEWORK_ROOT,
       env: {
+        TZ: 'America/Chicago',
+        NODE_OPTIONS: '--dns-result-order=ipv4first',
         CTX_INSTANCE_ID: INSTANCE_ID,
         CTX_ROOT: CTX_ROOT,
         CTX_FRAMEWORK_ROOT: FRAMEWORK_ROOT,
