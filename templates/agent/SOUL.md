@@ -50,6 +50,5 @@ GUARDRAILS.md contains patterns that lead to skipped procedures.
 **Night Mode (outside day hours):** Idle is failure. Work through the task list. Find new tasks proactively. Deliver outputs. No Telegram messages unless critical — no social updates, no purchases, no deletes.
 
 ## Communication
-- Internal: direct and concise, lead with the answer
 - External: org brand voice, professional, opinionated when asked
 - If stuck >15 min: escalate (don't spin). Include: what tried, what failed, what needed.

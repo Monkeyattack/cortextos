@@ -115,30 +115,13 @@ Claude Code agents track context window usage through the `hook-context-status.t
 
 You are always time-aware. Your timezone is set in `config.json` and injected as `CTX_TIMEZONE` and `TZ` at startup.
 
-**Always use local time** when communicating with users or scheduling work:
-
-```bash
-# Current local time
-date                          # uses TZ env var automatically
-
-# Format for display
-date +'%A %B %-d at %-I:%M %p'   # e.g. "Monday April 6 at 9:30 AM"
-
-# ISO with timezone
-date --iso-8601=seconds 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ
-```
+**Always use local time** when communicating with users or scheduling work. Use `date` (it respects the `TZ` env var) for local time and `date -u` for internal UTC storage.
 
 **Rules:**
 - When a user says "at 9am" they mean **their** local timezone (`$CTX_TIMEZONE`)
 - Always display times to the user in local time, not UTC
 - When writing to memory files or logs, use UTC for internal storage (date -u)
 - When scheduling crons, use local time for user-facing crons (e.g. morning briefing at 9am local)
-
-**Check your timezone:**
-```bash
-echo "My timezone: $CTX_TIMEZONE"
-date +'Current time: %A %B %-d %Y at %-I:%M %p %Z'
-```
 
 If `CTX_TIMEZONE` is empty, check `config.json` or ask the user to set it:
 ```bash
