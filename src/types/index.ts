@@ -801,7 +801,7 @@ export interface AgentInfo {
 
 export interface AgentStatus {
   name: string;
-  status: 'running' | 'stopped' | 'crashed' | 'starting' | 'halted';
+  status: 'running' | 'stopped' | 'crashed' | 'starting' | 'halted' | 'quota-suspended';
   pid?: number;
   uptime?: number; // seconds
   lastHeartbeat?: string;

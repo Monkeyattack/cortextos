@@ -48,6 +48,13 @@ export class AgentManager {
   // finishes so the next clean restart starts from a known-good baseline.
   private daemonJustCrashed: boolean = false;
 
+  // Quota circuit-breaker state
+  private readonly quotaSuspended = new Set<string>();
+  private readonly quotaSuspendedAt = new Map<string, number>();
+  private quotaProbeTimer: ReturnType<typeof setInterval> | null = null;
+  private quotaSuspendAlertTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly quotaSuspendAlertBatch: string[] = [];
+
   constructor(instanceId: string, ctxRoot: string, frameworkRoot: string, org: string) {
     this.instanceId = instanceId;
     this.ctxRoot = ctxRoot;
@@ -402,12 +409,64 @@ export class AgentManager {
           tgApi.sendMessage(tgChatId, `Agent ${name} HALTED — exceeded crash limit. Restart manually with: cortextos start ${name}`).catch(() => {});
         } else if (status.status === 'running' && prevStatus === 'crashed') {
           tgApi.sendMessage(tgChatId, `Agent ${name} recovered and is back online`).catch(() => {});
+        } else if (status.status === 'quota-suspended') {
+          this.quotaSuspended.add(name);
+          this.quotaSuspendedAt.set(name, Date.now());
+          this.quotaSuspendAlertBatch.push(name);
+          log(`[quota-circuit] ${name} suspended (${this.quotaSuspended.size} total). Probe every 15 min.`);
+
+          // Debounced consolidated Telegram P0 — batch all agents that suspend within 60 s
+          // into ONE alert so an 18-agent quota storm does not mirror as an 18-message storm.
+          if (this.quotaSuspendAlertTimer === null) {
+            this.quotaSuspendAlertTimer = setTimeout(() => {
+              const batch = [...this.quotaSuspendAlertBatch];
+              this.quotaSuspendAlertBatch.length = 0;
+              this.quotaSuspendAlertTimer = null;
+              const names = batch.join(', ');
+              tgApi.sendMessage(
+                tgChatId,
+                `⚠️ [quota-suspend] ${batch.length} agent(s) suspended after 4 consecutive quota errors: ${names}. Auto-probe every 15 min — will resume when utilisation <90%. Check /usage for reset time.`,
+              ).catch(() => {});
+            }, 60_000); // 60 s debounce window
+          }
+
+          // Start the 15-min probe if not already running
+          if (this.quotaProbeTimer === null) {
+            this.quotaProbeTimer = setInterval(() => {
+              void this.probeQuotaAndResume();
+            }, 15 * 60 * 1000);
+          }
         }
         prevStatus = status.status;
       });
     }
 
     this.agents.set(name, { process: agentProcess, checker });
+
+    // Guard 2 runtime clamp: enforce minimum 30s refreshInterval before Claude Code
+    // starts. Even if an operator manually edits settings.json to a lower value, the
+    // daemon patches it back atomically here so the next session always gets the floor.
+    const settingsJsonPath = join(agentDir, '.claude', 'settings.json');
+    try {
+      if (existsSync(settingsJsonPath)) {
+        const raw = readFileSync(settingsJsonPath, 'utf-8');
+        const parsed = JSON.parse(stripBom(raw));
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          parsed.statusLine &&
+          typeof parsed.statusLine.refreshInterval === 'number' &&
+          parsed.statusLine.refreshInterval < 30
+        ) {
+          const old = parsed.statusLine.refreshInterval;
+          parsed.statusLine.refreshInterval = 30;
+          writeFileSync(settingsJsonPath, JSON.stringify(parsed, null, 2) + '\n', 'utf-8');
+          console.warn(`[settings] ${name}: statusLine.refreshInterval clamped ${old}s → 30s (minimum 30s enforced)`);
+        }
+      }
+    } catch {
+      // Silently skip — malformed JSON is handled by fix-agent-settings, not here.
+    }
 
     // Start agent
     await agentProcess.start();
@@ -1273,6 +1332,51 @@ export class AgentManager {
       console.error(`[agent-manager] config.json invalid JSON: ${configPath}${locHint}: ${msg}`);
       console.error(`[agent-manager] hint: trailing commas, unquoted keys, and single quotes are common causes`);
       return {};
+    }
+  }
+
+  /** Probe quota utilisation and stagger-resume suspended agents when quota clears. */
+  private async probeQuotaAndResume(): Promise<void> {
+    if (this.quotaSuspended.size === 0) {
+      if (this.quotaProbeTimer !== null) {
+        clearInterval(this.quotaProbeTimer);
+        this.quotaProbeTimer = null;
+      }
+      return;
+    }
+    try {
+      // check-usage-api uses the cached OAuth usage endpoint — near-zero tokens, no model call.
+      const { execSync } = await import('child_process');
+      const raw = execSync('cortextos bus check-usage-api --json', { timeout: 10_000 }).toString();
+      const data = JSON.parse(raw) as { utilization?: number };
+      const util = data.utilization ?? 100;
+      if (util >= 90) {
+        console.log(`[quota-circuit] probe: utilisation ${util}% — still suspended, waiting`);
+        return;
+      }
+      // Quota recovered — stagger resume (alphabetical, one per 30 s)
+      const toResume = [...this.quotaSuspended].sort();
+      console.log(`[quota-circuit] probe: utilisation ${util}% — resuming ${toResume.length} agents (30s stagger)`);
+      if (this.quotaProbeTimer !== null) {
+        clearInterval(this.quotaProbeTimer);
+        this.quotaProbeTimer = null;
+      }
+      for (let i = 0; i < toResume.length; i++) {
+        const agentName = toResume[i];
+        setTimeout(() => {
+          this.quotaSuspended.delete(agentName);
+          this.quotaSuspendedAt.delete(agentName);
+          const entry = this.agents.get(agentName);
+          if (entry) {
+            console.log(`[quota-circuit] resuming ${agentName}`);
+            entry.process.start().catch(err =>
+              console.error(`[quota-circuit] resume failed for ${agentName}:`, err),
+            );
+          }
+        }, i * 30_000); // 30 s per agent, alphabetical order
+      }
+    } catch (err) {
+      console.error(`[quota-circuit] probe failed:`, err);
     }
   }
 }

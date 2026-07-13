@@ -71,6 +71,7 @@ export class AgentProcess {
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
+  private consecutiveQuotaErrors = 0;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -185,6 +186,7 @@ export class AgentProcess {
         return;
       }
       this.status = 'running';
+      this.consecutiveQuotaErrors = 0; // successful start resets the circuit-breaker counter
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
 
@@ -596,6 +598,46 @@ export class AgentProcess {
       return;
     }
 
+    // Quota circuit-breaker — must come AFTER image-poison check and BEFORE the crash-loop
+    // pauser so quota-driven exits neither inflate the crash-window counter nor trigger
+    // the daily crash budget. detectRateLimitInLog is already imported but was not wired.
+    const quotaLogPath = join(this.env.ctxRoot, 'logs', this.name, 'stdout.log');
+    if (detectRateLimitInLog(quotaLogPath)) {
+      this.consecutiveQuotaErrors++;
+      const n = this.consecutiveQuotaErrors;
+
+      if (n >= 4) {
+        // SUSPEND: stop spawning — agent-manager probe takes over via quota-suspended status.
+        // Do NOT call start() here; do NOT increment crashCount. The circuit is open.
+        // NOTE: a daemon restart during active quota exhaustion clears this in-memory state,
+        // so a brief re-attempt will occur before the breaker re-engages — this is expected,
+        // bounded behaviour, not a regression.
+        this.log(`QUOTA_SUSPENDED: ${n} consecutive quota errors — circuit open. Daemon probe will resume.`);
+        this.appendCrashToRestartsLog(exitCode, 0, 'QUOTA_SUSPENDED');
+        this.status = 'quota-suspended';
+        this.notifyStatusChange();
+        return;
+      }
+
+      // Jitter backoff: independent per agent so N agents do not thundering-herd on retry.
+      // Bases: 60 s / 120 s / 240 s with ±25 % jitter each.
+      const bases = [60_000, 120_000, 240_000];
+      const base = bases[Math.min(n - 1, bases.length - 1)];
+      const jitter = Math.round(base * (0.75 + Math.random() * 0.50));
+      this.log(`QUOTA_BACKOFF: consecutive error #${n}, retrying in ${jitter / 1000}s (base ${base / 1000}s ±25%)`);
+      this.appendCrashToRestartsLog(exitCode, jitter, 'QUOTA_BACKOFF');
+      this.status = 'crashed';
+      this.notifyStatusChange();
+      setTimeout(() => {
+        if (this.status === 'crashed') {
+          this.start().catch(err => this.log(`Quota-backoff restart failed: ${err}`));
+        }
+      }, jitter);
+      return;
+    }
+    // Non-quota crash: reset the consecutive counter so a later quota burst starts fresh.
+    this.consecutiveQuotaErrors = 0;
+
     // CrashLoopPauser (instar-inspired): if a sliding window is configured,
     // check whether the agent is crash-looping before falling through to
     // the legacy daily counter. The window is a more precise signal than
@@ -980,7 +1022,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'QUOTA_SUSPENDED' | 'QUOTA_BACKOFF',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);

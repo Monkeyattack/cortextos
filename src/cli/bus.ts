@@ -2852,10 +2852,12 @@ busCommand
       'ToolSearch', 'CronCreate', 'CronList', 'CronDelete',
       'Skill', 'Agent',
     ];
+    // refreshInterval minimum enforced floor is 30 seconds; set to 60 to avoid
+    // context-window pressure from high-frequency status polling.
     const STATUS_LINE = {
       type: 'command',
       command: 'cortextos bus hook-context-status',
-      refreshInterval: 5,
+      refreshInterval: 60,
       timeout: 2,
     };
 
@@ -2885,8 +2887,18 @@ busCommand
         const missing = REQUIRED_ALLOW.filter(t => !current.includes(t));
         if (missing.length > 0) changes.push(`allow: +[${missing.join(', ')}]`);
 
-        // Check statusLine
-        if (!settings.statusLine) changes.push('statusLine: add hook-context-status');
+        // Check statusLine — two conditions trigger a fix:
+        // 1. statusLine is completely missing → add the full STATUS_LINE block.
+        // 2. statusLine exists but refreshInterval is a number below 30 → clamp only,
+        //    preserving any other per-agent statusLine customizations.
+        if (!settings.statusLine) {
+          changes.push('statusLine: add hook-context-status');
+        } else if (
+          typeof settings.statusLine.refreshInterval === 'number' &&
+          settings.statusLine.refreshInterval < 30
+        ) {
+          changes.push(`statusLine.refreshInterval: ${settings.statusLine.refreshInterval}s → 30s (below minimum)`);
+        }
 
         if (changes.length === 0) {
           console.log(`  OK   ${agent}: already up to date`);
@@ -2900,7 +2912,14 @@ busCommand
         } else {
           settings.permissions = settings.permissions ?? {};
           settings.permissions.allow = [...current, ...missing];
-          settings.statusLine = STATUS_LINE;
+          if (!settings.statusLine) {
+            settings.statusLine = STATUS_LINE; // add fresh block
+          } else if (
+            typeof settings.statusLine.refreshInterval === 'number' &&
+            settings.statusLine.refreshInterval < 30
+          ) {
+            settings.statusLine.refreshInterval = 30; // clamp only — preserve other fields
+          }
           fsWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
           console.log(`  FIX  ${agent}: applied [${changes.join('; ')}]`);
           patched++;
