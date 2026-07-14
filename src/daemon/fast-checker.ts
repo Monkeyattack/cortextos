@@ -279,9 +279,11 @@ export class FastChecker {
     // fence the body cannot close, with the body left byte-exact so pasted code
     // blocks stay readable. The inline `from` is collapse-sanitized (it sits in
     // the header line, not a fence).
-    const safeFrom = sanitizeForPtyInjection(msg.from);
+    const safeFrom = sanitizeForPtyInjection(msg.from ?? '(unknown)');
+    // msg.text is typed string but legacy senders (e.g. taskmaster-poller) may use 'body' key
+    const msgText = msg.text ?? (msg as unknown as Record<string, unknown>).body as string ?? '';
     return `=== AGENT MESSAGE from ${safeFrom}${replyNote} [msg_id: ${msg.id}] ===
-${wrapFenceSafe(msg.text)}
+${wrapFenceSafe(msgText)}
 Reply using: cortextos bus send-message ${safeFrom} normal '<your reply>' ${msg.id}
 
 `;
