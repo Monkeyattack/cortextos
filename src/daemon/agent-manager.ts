@@ -464,8 +464,8 @@ export class AgentManager {
           console.warn(`[settings] ${name}: statusLine.refreshInterval clamped ${old}s → 30s (minimum 30s enforced)`);
         }
       }
-    } catch {
-      // Silently skip — malformed JSON is handled by fix-agent-settings, not here.
+    } catch (err) {
+      console.warn(`[settings] ${name}: could not read/parse settings.json for refreshInterval clamp — ${(err as Error).message}`);
     }
 
     // Start agent
