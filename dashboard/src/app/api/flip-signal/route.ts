@@ -11,9 +11,10 @@ export const dynamic = 'force-dynamic';
  * The pre-market check script writes a JSON file at 9:22 ET each weekday.
  * This endpoint reads that file and returns the signal.
  *
- * Response: { signal: "GO" | "SKIP", reason: string, checked_at: string }
+ * Response: { signal: "GO" | "SKIP", direction: "LONG" | "SHORT" | null, reason: string, checked_at: string }
  *
- * If no signal file exists for today, defaults to GO (don't block trading on stale data).
+ * direction: if non-null, only the matching instance fires (LONG instance skips on "SHORT" and vice versa).
+ * If no signal file exists for today, defaults to GO with no direction restriction.
  */
 export async function GET() {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
@@ -24,6 +25,7 @@ export async function GET() {
       // No file yet — default GO so strategy isn't blocked if script failed
       return NextResponse.json({
         signal: 'GO',
+        direction: null,
         reason: 'No pre-market check file found — defaulting to GO',
         checked_at: null,
       });
@@ -31,10 +33,12 @@ export async function GET() {
 
     const raw = fs.readFileSync(signalPath, 'utf-8');
     const data = JSON.parse(raw);
+    if (!('direction' in data)) data.direction = null;
     return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json({
       signal: 'GO',
+      direction: null,
       reason: `Signal file read error — defaulting to GO: ${err}`,
       checked_at: null,
     });

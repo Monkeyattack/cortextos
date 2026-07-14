@@ -1,12 +1,12 @@
 ---
 name: deal-workup
-description: "Run a full M&A deal workup on a business listing. Dispatches parallel research agents, produces 6 deliverables (deal book, market analysis, LOI + diligence list, investor pitch deck, one-page teaser, capital stack + returns model), mints each as a shared URL, and delivers tight headline + links. Owner: pm methodology; mechanics: devops."
+description: "Run a full M&A deal workup on a business listing. Dispatches parallel research agents, produces 8 deliverables (investment memo, deal book, broker interaction packet, market analysis, LOI + diligence list, investor pitch deck, one-page teaser, capital stack + returns model), mints each as a shared URL, and delivers tight headline + links. Owner: pm methodology; mechanics: devops."
 triggers: ["run a deal workup", "full workup", "deal workup on", "workup on", "run workup", "acquisition analysis", "do a workup", "deal analysis on", "vetting pass", "sheet vetting"]
 ---
 
 # deal-workup Skill
 
-Full M&A deal workup pipeline. Produces 6 investor-grade deliverables from a single listing input. Always spawn workers for research — NEVER run research inline.
+Full M&A deal workup pipeline. Produces 8 investor-grade deliverables from a single listing input. Always spawn workers for research — NEVER run research inline.
 
 **Canonical reference deliverables (gold-standard format):**
 - Deal book: https://files.profithits.app/preview/8f440eb32b88/pm/2026-06-04-dealbook-2-marketing-agency.md
@@ -67,6 +67,8 @@ If this is part of a multi-listing sheet, run a **vetting/tiering pass** first:
 
 Also compute the **quick-vet 0–100 score** (deterministic rubric in quick-vet SKILL.md §5: multiple vs norm 30 / revenue trend 20 / industry risk 15 / owner dependency 15 / deal type 10 / ask stated 10) and its rating: **STRONG (≥70) / WATCHLIST (45–69) / PASS (<45)** with a 1-sentence rationale. If the deal arrived from a `deal-flow-scan` digest it already has a score — reuse it, re-scoring only if the listing adds material new facts.
 
+Also run the **SELLER-Q transaction qualification (ADVISORY)**: inject `references/persona-deal-qualifier.md` into the intake pass, same mechanism as INDUSTRY CONTEXT. Score all 8 elements (0 to 5 each, 40 max) and produce the closeability verdict. Advisory status: for the first 5 workups after 2026-07-10 the SELLER-Q score gates NOTHING; it informs the Verdict and generates diligence asks only. Every element scored below 3 must generate a specific diligence ask (consumed by Deliverable 1's Diligence Asks section).
+
 Produce a brief intake summary (internal, not a deliverable):
 ```
 Business: [name / category]
@@ -74,11 +76,12 @@ Asking: $X | SDE: $Y | Revenue: $Z
 SDE Multiple: Xx | Rev Multiple: Xx | Margin: X%
 Headline: CHEAP / FAIR / RICH
 Score: NN/100 — STRONG / WATCHLIST / PASS — [1-sentence rationale]
+Seller-Q: NN/40, CLEAN PATH / CLOSEABLE WITH WORK / STRUCTURALLY BLOCKED (advisory)
 Tier: PURSUE / WATCH / PASS
 Listing URL: [from user, or PENDING]
 ```
 
-Carry the score + rating into the deal book's **Verdict** section.
+Carry the score + rating AND the SELLER-Q closeability verdict into the deal book's **Verdict** section. Closeability is cited (advisory) in the PURSUE/WATCH/PASS rationale: a strong asset with a STRUCTURALLY BLOCKED transaction is a WATCH, and the flip-to-PURSUE condition names the blocker.
 
 ---
 
@@ -131,10 +134,12 @@ Prompt templates live in `references/` alongside this SKILL.md. Substitute all `
 
 ### Worker A — Market + Valuation
 **Prompt template:** `references/market-valuation-prompt.md`
+**Persona:** inject `references/persona-bear-case-researcher.md` into the Worker A prompt, same mechanism as INDUSTRY CONTEXT. The valuation verdict must arrive with the bear mechanism, dollar-quantified downside, and variant view already built (persona rules 1, 2, 3, 6).
 **Output:** Market sizing, comp multiples, valuation verdict
 
 ### Worker B — Financing + Deal Structure + Risk
 **Prompt template:** `references/financing-risk-prompt.md`
+**Persona:** inject `references/persona-returns-modeler.md` into the Worker B prompt, same mechanism as INDUSTRY CONTEXT. Named drivers with sources and at least one alternative capital stack must arrive from research, never reverse-engineered at composition time (persona rules 1, 5).
 **Output:** SBA 7(a) sizing, capital stack, risk register
 
 ### Worker C — Market Deep-Dive + Growth Strategy
@@ -165,16 +170,42 @@ Collect all 3 outputs before proceeding.
 
 ## STAGE 2 — DELIVERABLES
 
-Produce all 6 deliverables (or the subset requested). Each is written to disk, minted, and URL recorded before the next is started.
+Produce all 8 deliverables (or the subset requested). Each is written to disk, minted, and URL recorded before the next is started.
+
+**Generation order within Stage 2 (BINDING):** Deliverable 7 (Investment Memo) first, immediately after Stage 0.5 and before (or alongside) Deliverable 1. Then Deliverable 1 (Deal Book). Then Deliverable 8 (Broker Interaction Packet). Deliverables 2 to 6 follow in any sensible order. The sections below are laid out in generation order, not numeric order.
+
+**PRE-MINT STRUCTURAL VALIDATION (BINDING, added 2026-07-14):** before minting the Investment Memo or the Broker Packet, run that artifact's structural gate as defined in its reference template: memo gate M1–M10 in `references/investment-memo-template.md`, packet gate P1–P10 in `references/broker-packet-template.md`. Both gates are ALL-BLOCK, mirroring the Deal Book's 13-point gate pattern: the artifact delivers only on a clean pass of every check; any failure means fix and re-check, never deliver-with-caveat.
 
 **File naming convention:** `pm/YYYY-MM-DD-<slug>-<type>.md` (or `.html`)
 **Mint command:** `bash /home/claude-dev/preview-server/scripts/mint-preview-url.sh <path>` — read returned token, compose URL. Never guess.
 
 ---
 
+### Deliverable 7 — Investment Memo (markdown, pre-Deal-Book)
+
+> **SECTION CONTRACT + STRUCTURAL GATE (BINDING, added 2026-07-14):** the full template, the 9-section mandatory contract, the tone rule (future Chris is the only reader), the UNVERIFIED-input rule, and the M1–M10 structural gate all live in `references/investment-memo-template.md`. That file is the contract; point at it, never duplicate or fork its gate table here.
+
+**Pipeline position:** generate AFTER Stage 0 (intake) and Stage 0.5 (industry profile), BEFORE (or alongside) Deliverable 1 (Deal Book). The memo is the decision doc written for future Chris; the Deal Book is the evidence doc.
+
+**Inputs (name all four explicitly in the composition prompt):**
+- Stage 0 intake summary (multiples, margin, headline, tier)
+- Stage 0.5 industry profile (the same INDUSTRY CONTEXT block injected into workers)
+- Quick-vet 0–100 score + rating
+- SELLER-Q score + closeability verdict (advisory)
+
+**Shared-object rule (BINDING):** the memo's §9 Recommendation block central question and the Deal Book's Central Question section are THE SAME composed object. Compose it once, reuse it verbatim in both artifacts. Divergence is a gate failure on whichever artifact was composed second (memo check M8; Deal Book G12 consistency sweep).
+
+**File naming:** `pm/YYYY-MM-DD-<slug>-investment-memo.md`
+
+**Pre-mint gate:** run the M1–M10 structural gate from the reference template before minting. ALL-BLOCK: deliver only on a clean 10/10; any failure means fix and re-check, never deliver-with-caveat.
+
+---
+
 ### Deliverable 1 — Deal Book (markdown)
 
 > **SECTION CONTRACT + VERIFICATION GATE (BINDING, added 2026-07-06):** the canonical section shape is now the 12-section contract in `orgs/prop-firm-admin/knowledge/deal-flow-hardening/DRAFT_dealbook_section_contract.md` — it EXTENDS the list below with: §2 Real-Estate Strip as a HARD FIRST-ORDER step (no multiple judged off an RE-inclusive ask anywhere in the book; owner-occupied → market-rent-adjusted SDE), §6 Add-Back Scrutiny (every add-back classified DEFENSIBLE/AGGRESSIVE/UNVERIFIABLE + Scrubbed SDE feeding the bear case), §8 THREE value cases (bull/normalized/bear, explicit assumptions, DSCR each), and §11 Verdict that is **INVALID without BOTH flip-to-PURSUE and flip-to-PASS conditions** (concrete, diligence-checkable). Before minting/sending, run the contract's **13-point verification gate (G1–G13, all-BLOCK)** — a book delivers only on a clean 13/13, including the G12 internal-consistency sweep (same figure means the same thing in every section). Dispatch prompts need only say: "Produce the deal book per the section contract; run the verification gate; deliver only on 13/13."
+
+> **PERSONA STANDARDS (added 2026-07-10):** when composing §8 (three value cases) and §11 (Verdict), inject `references/persona-bear-case-researcher.md`, same mechanism as INDUSTRY CONTEXT: the bear column is built from named mechanisms feeding Scrubbed SDE (never a haircut percentage), the flip conditions are written as thesis breakers with thresholds, and the Verdict carries a HIGH / MEDIUM / LOW conviction label plus evidence tier. When composing the Diligence Asks section and the §11 Verdict citation, inject `references/persona-deal-qualifier.md`: every SELLER-Q element scored below 3 generates a specific diligence ask (this is the generation rule, replacing static-template asks), and the closeability verdict (advisory, no hard gate for the first 5 workups after 2026-07-10) is cited in the PURSUE/WATCH/PASS rationale. These tighten compliance with the existing contract; the 13-point gate itself is unchanged.
 
 **Sections in order (MANDATORY):**
 ```
@@ -221,6 +252,61 @@ PURSUE / WATCH / PASS + 2–3 sentence rationale
 ---
 _Illustrative / pre-tax / seller-reported — confirm via Q-of-E._
 ```
+
+---
+
+### Deliverable 8 — Broker Interaction Packet (markdown, post-Deal-Book)
+
+> **SECTION CONTRACT + STRUCTURAL GATE (BINDING, added 2026-07-14):** the full template, the 7-section mandatory contract, the §5↔§6 field-parity rule, the §7 flow-back table, and the P1–P10 structural gate all live in `references/broker-packet-template.md`. That file is the contract; point at it, never duplicate or fork its gate table here.
+
+**Pipeline position:** generate AFTER Deliverable 1 (Deal Book), BEFORE first broker/seller contact. The packet header names which Deal Book version (v1, v2, ...) it was built from.
+
+**File naming:** `pm/YYYY-MM-DD-<slug>-broker-packet.md`
+
+**Pre-mint gate:** run the P1–P10 structural gate from the reference template before minting. ALL-BLOCK: deliver only on a clean 10/10; any failure means fix and re-check, never deliver-with-caveat.
+
+#### Post-call flow-back + Deal Book v2 regeneration (BINDING)
+
+After the broker/seller call, the post-call step transcribes live-note answers into structured facts per the flow-back table in `references/broker-packet-template.md` §7. The field classes that flow back (see the §7 table for exact Deal Book targets):
+
+- Confirmed or corrected asking price and RE allocation (valuation inputs)
+- Add-back explanations, confirmed or walked back (Scrubbed SDE)
+- Seller motivation, timeline, and process state (closeability, SELLER-Q rescore)
+- New risk facts: customer loss, litigation, lease terms, key-person (risk register)
+- Answered diligence items (open-items list)
+- Any fact changing confidence, score, valuation, or risk (quick-vet rescore if material)
+
+**Deal Book v2 rule:** v2 is a RE-RUN of Deliverable 1 with the post-call facts injected as inputs. It is NEVER a manual edit of the v1 file. The v2 header carries the version plus the regeneration date and trigger (e.g. "v2, regenerated 2026-07-20 post broker call"). The full 13-point verification gate (G1–G13) re-runs in full; versioning skips nothing. The v2 book is minted fresh and PATCHed onto the deal record, replacing the v1 `dealbook_url`. Regeneration fires when any flow-back field changed materially; a call producing zero material facts logs to the question-outcome log with "no regen: no material facts" and does NOT trigger regeneration.
+
+#### Question-outcome log (learning loop, required per interaction)
+
+Every outbound question set is logged with outcomes. Format: append-only markdown table at `workspace/deal-pipeline-v2/question-outcome-log.md`, one row per question per interaction (Date / Deal / Question / Outcome). Never edit or delete prior rows; corrections are new rows. Outcome vocabulary is exactly three values:
+
+- `answered`: a usable answer was given
+- `dodged`: deflected, deferred, or non-answered; candidate for written follow-up or rephrasing
+- `deal-advancing`: the answer materially moved the deal; supersedes `answered` when both apply
+
+Logging is part of the post-call step: a call is not processed until its questions are logged.
+
+#### Approval chain for outbound broker/seller content (BINDING)
+
+The chain, in order, with no skips:
+
+1. AI generates the questions and information request (this deliverable).
+2. Analyst dedupes and fixes grammar. Nothing else.
+3. Chris deletes ~5 questions, adds ~2, and approves. The Chris step is a taskmaster send-decision BUTTON (decision routing via taskmaster), never a free-text ask.
+4. Analyst sends the approved content.
+
+Until a coordinator is hired, "analyst" = the pm agent staging the content, with Chris approving via taskmaster decision buttons.
+
+#### Approval-chain boundary rules (canonical wording)
+
+> These four rules are canonical. The Acquisition Coordinator job spec (Deal Pipeline v2, task B2) copies them VERBATIM.
+>
+> 1. The analyst never decides outreach content. Analyst edits are limited to deduplication and grammar.
+> 2. Nothing is sent to a broker or seller without explicit Chris approval, delivered via a taskmaster send-decision button.
+> 3. The analyst stages and sends; the analyst never approves. Chris approval cannot be inferred, assumed, or substituted.
+> 4. All judgment calls on content, structure, price, or tone escalate to Chris.
 
 ---
 
@@ -317,6 +403,8 @@ _[COUNSEL] items require attorney review prior to submission. Not an offer of se
 
 **Format:** Each `##` heading = one slide. Keep slides tight — bullet points only, no paragraphs.
 
+**Persona:** inject `references/persona-narrative-architect.md` before composing, same mechanism as INDUSTRY CONTEXT. Write the deal thesis and 2 to 3 conviction themes first, then compose slides through the three-act arc. The existing slide order stands; the acts change how slides are written, not which slides exist. Note: the thesis and the deal book's Central Question are the same idea at different altitudes, so compose the thesis before finalizing the Central Question.
+
 ```
 # [Business Name] — Acquisition Opportunity
 _[Date] | Confidential | Not an offer of securities — counsel to paper any raise_
@@ -390,6 +478,8 @@ _Illustrative / pre-tax / seller-reported — confirm via Q-of-E. Not an offer o
 - Clean, print-ready layout (A4/Letter). Think executive memo, not pitch theater.
 - 60-second pre-NDA version — no confidential financials; just the hook.
 
+**Persona:** inject `references/persona-narrative-architect.md`, same mechanism as INDUSTRY CONTEXT. The teaser is the deal thesis at pre-NDA altitude: hook and mechanism only. If the teaser and the deck argue different theses, one of them is wrong.
+
 **Sections:**
 1. Header: Business name + tagline + asking price range (can be rounded/obscured)
 2. Why This Business (3 bullets)
@@ -406,6 +496,8 @@ Verify HTTP 200 + `Content-Type: text/html` on the minted URL before delivering.
 ### Deliverable 6 — Capital Stack + Returns Model (designed HTML)
 
 **Rules:** Same HTML self-containment rules as Deliverable 5.
+
+**Persona:** inject `references/persona-returns-modeler.md` into the composition prompt, same mechanism as INDUSTRY CONTEXT. Two NEW artifacts: a scenario assumptions table (driver values for bull / base / bear, placed above the returns sections) and an alternative-stack comparison row (chosen stack next to at least one alternative with DSCR and Y1 CoC each). Everything else is composition discipline on the existing sections below, including the sensitivity-king callout and lender vs investor framing.
 
 **Sections:**
 1. Header: Business name + deal date
@@ -533,4 +625,4 @@ cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID '<message with URLs>'
 
 ---
 
-_Skill owner: pm (analytical content) / devops (mechanics). Last updated: 2026-06-04._
+_Skill owner: pm (analytical content) / devops (mechanics). Last updated: 2026-07-14 (Deliverables 7+8 wired: Investment Memo + Broker Interaction Packet, Deal Pipeline v2 tasks A3 to A6; see references/investment-memo-template.md + references/broker-packet-template.md)._
