@@ -1,0 +1,89 @@
+{
+  "agent_name": "devops",
+  "enabled": true,
+  "startup_delay": 0,
+  "max_session_seconds": 43200,
+  "max_crashes_per_day": 10,
+  "working_directory": "",
+  "timezone": "America/Chicago",
+  "crons": [
+    {
+      "name": "autoresearch-incident-latency",
+      "type": "recurring",
+      "cron": "0 17 * * *",
+      "prompt": "Read .claude/skills/autoresearch/SKILL.md and execute the experiment loop for cycle incident_response_latency. ACTIVITY GATE: first check for failure-trigger tasks created in the last 24h via `cortextos bus list-tasks --agent devops --format json` filtered by title LIKE 'failure-trigger:%' AND created_at > 24h ago. If zero new failure-trigger tasks found, log 'incident_response_latency: no new failures in 24h \u2014 skipping measurement' and stop. Only run the full experiment loop if >=1 new failure-trigger task exists in the window."
+    },
+    {
+      "name": "heartbeat",
+      "type": "recurring",
+      "interval": "8h",
+      "prompt": "Read HEARTBEAT.md and follow its instructions. Update your heartbeat, check inbox, scan pending tasks for failure-keyword titles and triage immediately (do not defer), then work on your highest priority task. If no active tasks exist (cortextos bus list-tasks --status in_progress returns empty), skip non-essential work and defer to next heartbeat."
+    },
+    {
+      "name": "tmp-cleanup",
+      "type": "recurring",
+      "cron": "0 9 * * *",
+      "prompt": "Run scripts/tmp-cleanup.sh from this agent's working directory. The script deletes /tmp/_*.txt and /tmp/*.txt older than 24h, /tmp/.tmp* dirs older than 24h (Claude Code temp dirs), and /tmp/*.vhost + /tmp/*.sh staging files older than 48h. Excludes system dirs (.ICE-unix .X11-unix .font-unix .XIM-unix) and .remember. Reports removed count + bytes freed. Schedule: 04:00 UTC daily."
+    },
+    {
+      "name": "heartbeat-stamp",
+      "type": "recurring",
+      "cron": "23 * * * *",
+      "prompt": "Mid-session heartbeat. Step 1: `cortextos bus update-cron-fire heartbeat-stamp --interval 1h` (registers the fire in cron-state.json so the daemon gap-detector stops nudging \u2014 see writer's bug_cron_state_drift.md). Step 2: `cortextos bus update-heartbeat \"active \u2014 mid-session\"` to stamp the dashboard. Skip the full heartbeat checklist; this is just the cadence ping for analyst/chief during multi-hour sessions."
+    },
+    {
+      "name": "fred-vixcls-refresh",
+      "type": "recurring",
+      "cron": "0 18 * * 1-5",
+      "prompt": "Refresh FRED VIXCLS.csv for analyst MNQ research. Run: curl -s 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS' -o /home/claude-dev/repos/orbfutures/data/VIXCLS.csv && echo \"VIXCLS refreshed: $(tail -1 /home/claude-dev/repos/orbfutures/data/VIXCLS.csv)\". Log success silently. On failure, log the error and move on."
+    },
+    {
+      "name": "autoresearch-infra-throughput",
+      "type": "recurring",
+      "cron": "0 14 * * *",
+      "prompt": "Read .claude/skills/autoresearch/SKILL.md and execute the experiment loop for cycle infra_task_throughput."
+    },
+    {
+      "name": "aitheist-orphan-sweep",
+      "type": "recurring",
+      "cron": "17,47 * * * *",
+      "prompt": "Aitheist orphan render-job sweep. Step 1: `cortextos bus update-cron-fire aitheist-orphan-sweep --interval 30m` (registers the fire so the daemon gap-detector stops nudging). Step 2: `cd /home/claude-dev/repos/ai-theist && node scripts/sweep-orphan-render-jobs.mjs`. If output ends with 'no orphans' \u2014 acknowledge silently with one short line. If orphans were swept \u2014 report the count + first few IDs and post an event log. Script threshold is 20 min pending; cron fires every 30 min so max detection latency ~50 min."
+    },
+    {
+      "name": "daily-context-reset",
+      "type": "recurring",
+      "cron": "0 8 * * *",
+      "prompt": "Preventive context-reset hard-restart. Quickly: (1) update heartbeat to scheduled context reset, (2) save any in-flight state to memory/YYYY-MM-DD.md, (3) run cortextos bus hard-restart --reason daily-context-reset. This keeps context from accumulating."
+    },
+    {
+      "name": "forward-test-refresh",
+      "type": "recurring",
+      "cron": "0 2 * * 1-5",
+      "prompt": "Run the orbfutures forward test to refresh /tmp/orb_status.json. Command: cd /home/claude-dev/repos/orbfutures && python3 -m backtest.forward_test --instruments MCL --window 30 2>&1 | tail -5. Log output to memory. If it errors, log the error and report to analyst."
+    },
+    {
+      "name": "h137-monitor",
+      "type": "recurring",
+      "cron": "0 15 * * 1-5",
+      "prompt": "Run H137 live monitoring: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/h137-monitor.sh and report output. If TRIPWIRE RED: immediately send-message chief urgent with the output and create a failure-trigger task. If TRIPWIRE YELLOW: send-message analyst normal with output. If OK or 0 trades: log silently."
+    }
+  ],
+  "ecosystem": {
+    "local_version_control": {
+      "enabled": true
+    }
+  },
+  "day_mode_start": "10:00",
+  "day_mode_end": "02:00",
+  "communication_style": "technical",
+  "approval_rules": {
+    "always_ask": [
+      "external-comms",
+      "financial",
+      "deployment",
+      "data-deletion"
+    ],
+    "never_ask": []
+  },
+  "model": "claude-sonnet-4-6"
+}
