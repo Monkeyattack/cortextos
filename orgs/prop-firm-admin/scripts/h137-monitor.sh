@@ -20,6 +20,21 @@ if ! psql "$DB_URL" -X -A -t -q -c "SELECT 1" >/dev/null 2>&1; then
   exit 0
 fi
 
+# Staleness check: NT8 can detach without posting a disabled event — a stale
+# Active row is NOT active. If last_seen > 2h old, report and skip tripwires.
+LAST_SEEN=$(psql_q "SELECT last_seen FROM strategy_states
+                    WHERE account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}'
+                    ORDER BY last_seen DESC LIMIT 1;")
+if [ -n "$LAST_SEEN" ]; then
+  FRESH=$(psql_q "SELECT COUNT(*) FROM strategy_states
+                  WHERE account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}'
+                  AND last_seen > NOW() - INTERVAL '2 hours';")
+  if [ "${FRESH:-0}" -eq 0 ]; then
+    echo "H137 MONITOR: strategy state STALE (last seen: ${LAST_SEEN}) — NT8 may be offline"
+    exit 0
+  fi
+fi
+
 WHERE="account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}' AND exit_time IS NOT NULL"
 
 STATS=$(psql_q "SELECT COUNT(*),
