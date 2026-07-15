@@ -202,6 +202,7 @@ WORKER_NAME="m2c1-$(basename $PROJECT_DIR)"
 
 cortextos spawn-worker "$WORKER_NAME" \
   --dir "$PROJECT_DIR" \
+  --runtime claude \
   --prompt "Read AGENTS.md for your instructions, then read BRAINDUMP.md for the project spec. Begin the M2C1 workflow starting with Phase 0." \
   --parent $CTX_AGENT_NAME
 ```

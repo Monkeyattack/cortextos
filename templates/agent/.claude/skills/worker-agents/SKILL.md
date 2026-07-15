@@ -56,9 +56,12 @@ Before spawning, answer:
 ```bash
 cortextos spawn-worker <worker-name> \
   --dir <absolute-path-to-project-dir> \
+  --runtime codex \
   --prompt "Read AGENTS.md for your task. Deliverables: <list>. When done: cortextos bus send-message $CTX_AGENT_NAME normal 'Done: <summary>'" \
   --parent $CTX_AGENT_NAME
 ```
+
+> **Runtime default:** Use `--runtime codex` for mechanical/execution/research workers. Use `--runtime claude` explicitly only when the worker requires Claude-specific tooling: cortextOS Skills, MCP servers, MEMORY.md access, or complex judgment/reasoning that Codex cannot fulfill.
 
 The worker:
 - Runs `claude --dangerously-skip-permissions` in the given directory

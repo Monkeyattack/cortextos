@@ -46,6 +46,8 @@ Ingest after:
 - Writing or updating MEMORY.md
 - Learning important facts about the org, users, or systems
 
+**Timing note:** `kb-ingest` produces no output for ~25s on first run (chromadb native lib loads in 17-20s, then the Gemini embed API call adds ~10s). This is normal — use a **90s+ timeout** when calling from scripts. The process exits cleanly; it just looks hung.
+
 ---
 
 ## List Collections
