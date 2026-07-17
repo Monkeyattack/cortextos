@@ -64,8 +64,9 @@
     {
       "name": "h137-monitor",
       "type": "recurring",
-      "cron": "0 15 * * 1-5",
-      "prompt": "Run H137 live monitoring: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/h137-monitor.sh and report output. If TRIPWIRE RED: immediately send-message chief urgent with the output and create a failure-trigger task. If TRIPWIRE YELLOW: send-message analyst normal with output. If OK or 0 trades: log silently."
+      "cron": "30 21 * * 1-5",
+      "prompt": "Run H137 live monitoring: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/h137-monitor.sh and report output. If TRIPWIRE RED: immediately send-message chief urgent with the output and create a failure-trigger task. If TRIPWIRE YELLOW: send-message analyst normal with output. If OK or 0 trades: log silently.",
+      "note": "Post-close: 21:30 UTC = 4:30 PM ET, after MES session EOD exit. Run manually on day 1 regardless of cron fire."
     }
   ],
   "ecosystem": {
