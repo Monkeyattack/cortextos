@@ -89,6 +89,9 @@ LAST_QTY=$(psql_q "SELECT qty FROM executions
                      AND instrument LIKE 'MES%'
                      AND timestamp >= DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago'
                    ORDER BY timestamp DESC LIMIT 1;")
+# NOTE: CURRENT_DATE AT TIME ZONE 'America/Chicago' is WRONG — postgres converts
+# UTC midnight BACKWARD to Chicago (19:00 UTC prior day in CDT), not forward.
+# Use DATE_TRUNC('day', NOW() AT TIME ZONE tz) AT TIME ZONE tz for local midnight in UTC.
 if [ -n "$LAST_QTY" ] && [ "$LAST_QTY" -ne "$GATED_QTY" ]; then
   MSG="H137 TRIPWIRE RED: qty GATE VIOLATION — last fill qty=${LAST_QTY} vs gated config Contracts=${GATED_QTY}. Verify NT8 strategy Contracts parameter and pause until confirmed."
   echo "$MSG"
