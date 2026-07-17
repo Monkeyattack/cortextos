@@ -87,7 +87,7 @@ GATED_QTY=1
 LAST_QTY=$(psql_q "SELECT qty FROM executions
                    WHERE account_name='${ACCOUNT}'
                      AND instrument LIKE 'MES%'
-                     AND timestamp >= CURRENT_DATE AT TIME ZONE 'America/Chicago'
+                     AND timestamp >= DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago'
                    ORDER BY timestamp DESC LIMIT 1;")
 if [ -n "$LAST_QTY" ] && [ "$LAST_QTY" -ne "$GATED_QTY" ]; then
   MSG="H137 TRIPWIRE RED: qty GATE VIOLATION — last fill qty=${LAST_QTY} vs gated config Contracts=${GATED_QTY}. Verify NT8 strategy Contracts parameter and pause until confirmed."
