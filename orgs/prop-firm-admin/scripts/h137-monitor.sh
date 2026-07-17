@@ -48,17 +48,31 @@ fi
 
 # Staleness check: NT8 can detach without posting a disabled event — a stale
 # Active row is NOT active. If last_seen > 2h old, report and skip tripwires.
+# IMPORTANT: "0 trades observed" and "0 trades occurred" are different claims.
+# When pipeline is dark we CANNOT distinguish them — output must say so explicitly.
 LAST_SEEN=$(psql_q "SELECT last_seen FROM strategy_states
                     WHERE account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}'
                     ORDER BY last_seen DESC LIMIT 1;")
-if [ -n "$LAST_SEEN" ]; then
-  FRESH=$(psql_q "SELECT COUNT(*) FROM strategy_states
-                  WHERE account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}'
-                  AND last_seen > NOW() - INTERVAL '2 hours';")
-  if [ "${FRESH:-0}" -eq 0 ]; then
-    echo "H137 MONITOR: strategy state STALE (last seen: ${LAST_SEEN}) — NT8 may be offline"
-    exit 0
-  fi
+
+if [ -z "$LAST_SEEN" ]; then
+  MSG="⚠️ H137 MONITOR — PIPELINE DARK: no strategy_states row for ${ACCOUNT}/${STRATEGY}. NT8 has never posted or rows were deleted. 0 trades OBSERVED ≠ 0 trades OCCURRED — cannot distinguish. Check NT8 terminal."
+  echo "$MSG"
+  _send_daily "$MSG"
+  exit 0
+fi
+
+FRESH=$(psql_q "SELECT COUNT(*) FROM strategy_states
+                WHERE account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}'
+                AND last_seen > NOW() - INTERVAL '2 hours';")
+if [ "${FRESH:-0}" -eq 0 ]; then
+  AGE_HOURS=$(psql_q "SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - last_seen)) / 3600, 1)
+                      FROM strategy_states
+                      WHERE account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}'
+                      ORDER BY last_seen DESC LIMIT 1;")
+  MSG="⚠️ H137 MONITOR — PIPELINE DARK (${AGE_HOURS}h stale, last: ${LAST_SEEN}): 0 trades OBSERVED but pipeline is dark — cannot confirm 0 trades OCCURRED. NT8/MonkeyAttackMonitor may be offline. Verify terminal before treating as skip-day."
+  echo "$MSG"
+  _send_daily "$MSG"
+  exit 0
 fi
 
 WHERE="account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}' AND exit_time IS NOT NULL"
@@ -67,10 +81,13 @@ WHERE="account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}' AND exit_time I
 PRE_RED=0
 
 # 1. Qty gate — gated pilot config: Contracts=1
+# Scoped to CURRENT SESSION only (entry_time >= today CT) to avoid re-flagging
+# adjudicated historical fills (e.g. the 3-lot manual exit excluded 2026-07-16).
 GATED_QTY=1
 LAST_QTY=$(psql_q "SELECT qty FROM executions
                    WHERE account_name='${ACCOUNT}'
                      AND instrument LIKE 'MES%'
+                     AND timestamp >= CURRENT_DATE AT TIME ZONE 'America/Chicago'
                    ORDER BY timestamp DESC LIMIT 1;")
 if [ -n "$LAST_QTY" ] && [ "$LAST_QTY" -ne "$GATED_QTY" ]; then
   MSG="H137 TRIPWIRE RED: qty GATE VIOLATION — last fill qty=${LAST_QTY} vs gated config Contracts=${GATED_QTY}. Verify NT8 strategy Contracts parameter and pause until confirmed."
