@@ -62,11 +62,31 @@
       "prompt": "Run the orbfutures forward test to refresh /tmp/orb_status.json. Command: cd /home/claude-dev/repos/orbfutures && python3 -m backtest.forward_test --instruments MCL --window 30 2>&1 | tail -5. Log output to memory. If it errors, log the error and report to analyst."
     },
     {
+      "name": "nt8-pipeline-check",
+      "type": "recurring",
+      "cron": "0 12 * * 1-5",
+      "prompt": "Pre-market NT8 pipeline health check. Run: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/nt8-pipeline-check.sh. If output contains ALERT: report to chief immediately via send-message. If OK: log silently."
+    },
+    {
       "name": "h137-monitor",
       "type": "recurring",
       "cron": "30 21 * * 1-5",
       "prompt": "Run H137 live monitoring: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/h137-monitor.sh and report output. If TRIPWIRE RED: immediately send-message chief urgent with the output and create a failure-trigger task. If TRIPWIRE YELLOW: send-message analyst normal with output. If OK or 0 trades: log silently.",
       "note": "Post-close: 21:30 UTC = 4:30 PM ET, after MES session EOD exit. Run manually on day 1 regardless of cron fire."
+    },
+    {
+      "name": "h137-premarket-check",
+      "type": "recurring",
+      "cron": "15 13 * * 1-5",
+      "prompt": "H137 pre-market health check (9:15 ET, 15 min before signal window). Run: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/h137-premarket-check.sh. If output contains RED: escalate to chief immediately and send-message fable-reviewer urgent. If OK: log silently.",
+      "note": "Checks PAAPEX4333770000017/H137_BilateralBreakout: pipeline fresh (<2h) AND state=Active. RED fires Telegram to Chris + inbox alerts."
+    },
+    {
+      "name": "h137-morning-check",
+      "type": "recurring",
+      "cron": "0 9 * * 1-5",
+      "prompt": "H137 morning staleness check (4:00 CT, overnight gap monitor). Run: bash /home/claude-dev/cortextos/orgs/prop-firm-admin/scripts/h137-premarket-check.sh. If output contains RED: create a failure-trigger task titled 'failure-trigger: H137 pipeline dark (overnight)' and send-message fable-reviewer urgent + chief urgent. If OK: log silently.",
+      "note": "exp_1784308051_4qega: closes 12h overnight blind spot (21:30→09:00 UTC). Reuses premarket check script."
     }
   ],
   "ecosystem": {
