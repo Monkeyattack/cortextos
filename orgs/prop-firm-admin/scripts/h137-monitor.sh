@@ -4,6 +4,9 @@
 # YELLOW watch zone <=58.6%, slippage >3t rolling mean (>=20 fills).
 # Always exits 0 — never crash the cron.
 
+DOW=$(date +%u)  # 1=Mon ... 7=Sun
+if [[ $DOW -ge 6 ]]; then echo "[h137-monitor] MARKET CLOSED (weekend) — $(date +'%A')"; exit 0; fi
+
 set -u
 
 DB_URL="postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard"
