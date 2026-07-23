@@ -376,7 +376,10 @@ busCommand
     const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
 
     console.log(`\n  Tasks (${tasks.length})\n`);
-    const header = '  Status  Pri  ID                        Assignee         Title';
+    // ID is placed LAST and never truncated so the full task id (including
+    // the `_<random>` suffix) is always copy-pasteable — agents need it verbatim
+    // for complete-task/update-task.
+    const header = '  Status  Pri  Assignee         Title                                               ID';
     const separator = '  ' + '-'.repeat(header.length - 2);
     console.log(header);
     console.log(separator);
@@ -384,10 +387,9 @@ busCommand
     for (const t of tasks) {
       const statusIcon = (STATUS_ICON[t.status] || '?').padEnd(8);
       const priIcon = (PRIORITY_ICON[t.priority] || '·').padEnd(5);
-      const id = t.id.substring(0, 26).padEnd(26);
       const assignee = (t.assigned_to || '-').substring(0, 16).padEnd(17);
-      const title = t.title.substring(0, 50);
-      console.log(`  ${statusIcon}${priIcon}${id}${assignee}${title}`);
+      const title = t.title.substring(0, 50).padEnd(52);
+      console.log(`  ${statusIcon}${priIcon}${assignee}${title}${t.id}`);
     }
     console.log('');
   });
