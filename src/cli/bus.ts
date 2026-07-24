@@ -1156,19 +1156,28 @@ busCommand
       process.exit(1);
     }
 
-    const result = queryKnowledgeBase(
-      resolvePaths(env.agentName, env.instanceId, org),
-      question,
-      {
-        org,
-        agent: opts.agent || env.agentName,
-        scope: (opts.scope as 'shared' | 'private' | 'all') || 'all',
-        topK: parseInt(opts.topK || '5', 10),
-        threshold: parseFloat(opts.threshold || '0.5'),
-        frameworkRoot: env.frameworkRoot || process.cwd(),
-        instanceId: env.instanceId,
-      },
-    );
+    // A degraded KB must exit non-zero with a one-line reason, not dump a Node
+    // stack trace and not quietly print "No results found". Callers (agents,
+    // health checks) key off the exit code.
+    let result;
+    try {
+      result = queryKnowledgeBase(
+        resolvePaths(env.agentName, env.instanceId, org),
+        question,
+        {
+          org,
+          agent: opts.agent || env.agentName,
+          scope: (opts.scope as 'shared' | 'private' | 'all') || 'all',
+          topK: parseInt(opts.topK || '5', 10),
+          threshold: parseFloat(opts.threshold || '0.5'),
+          frameworkRoot: env.frameworkRoot || process.cwd(),
+          instanceId: env.instanceId,
+        },
+      );
+    } catch (err) {
+      console.error(`ERROR: ${(err as Error).message}`);
+      process.exit(1);
+    }
 
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
