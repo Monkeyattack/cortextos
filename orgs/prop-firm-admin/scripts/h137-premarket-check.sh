@@ -19,6 +19,20 @@ CHAT_ID="6585156851"
 PILOT_ACCOUNT="PAAPEX4333770000017"
 PILOT_STRATEGY="H137_BilateralBreakout"
 
+# Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
+# Each entry MUST carry a reason and a removal condition.
+SUPPRESSED_PAIRS=(
+  'PPNTF100024895000002|MarketOpenFlip'  # tombstone-gap: detached strategy, pending Chris decision — remove when task_1784882768044 ships
+)
+
+is_suppressed() {
+  local pair="$1" s
+  for s in "${SUPPRESSED_PAIRS[@]}"; do
+    [ "$s" = "$pair" ] && return 0
+  done
+  return 1
+}
+
 send_telegram() {
   local msg="$1"
   if [[ "$DRYRUN" == "1" ]]; then
@@ -80,21 +94,44 @@ if [ "${ZOMBIE_COUNT:-0}" -gt 0 ]; then
   ZOMBIE_NOTE=" (${ZOMBIE_COUNT} zombie rows >134h excluded — weekly cleanup)"
 fi
 
-if [ -z "$STALE_ROWS" ]; then
-  echo "[premarket-check] OK: ${ACTIVE_FRESH} active strategies fresh${ZOMBIE_NOTE} (${CT_TIME})"
+# OK path — used both when nothing is stale and when every stale row is suppressed.
+emit_ok() {
+  local suppressed="${1:-0}" note=""
+  if [ "$suppressed" -gt 0 ]; then
+    note=" (suppressed ${suppressed} known false-positive"
+    [ "$suppressed" -gt 1 ] && note="${note}s"
+    note="${note})"
+  fi
+  echo "[premarket-check] OK: ${ACTIVE_FRESH} active strategies fresh${note}${ZOMBIE_NOTE} (${CT_TIME})"
   cortextos bus log-event action premarket_check_ok info \
-    --meta "{\"fresh_count\":${ACTIVE_FRESH:-0},\"zombie_count\":${ZOMBIE_COUNT:-0}}" 2>/dev/null || true
+    --meta "{\"fresh_count\":${ACTIVE_FRESH:-0},\"zombie_count\":${ZOMBIE_COUNT:-0},\"suppressed_count\":${suppressed}}" 2>/dev/null || true
+}
+
+if [ -z "$STALE_ROWS" ]; then
+  emit_ok 0
   exit 0
 fi
 
-# Build stale list (active-roster only)
+# Build stale list (active-roster only), skipping known false-positive pairs
 STALE_LIST=""
 STALE_COUNT=0
+SUPPRESSED_COUNT=0
 while IFS='|' read -r acct strat age_h; do
   [ -z "$acct" ] && continue
+  if is_suppressed "${acct}|${strat}"; then
+    echo "[premarket-check] SUPPRESSED: ${strat} / ${acct}: ${age_h}h stale (known false-positive)"
+    SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
+    continue
+  fi
   STALE_LIST="${STALE_LIST}  ${strat} / ${acct}: ${age_h}h stale"$'\n'
   STALE_COUNT=$((STALE_COUNT + 1))
 done <<< "$STALE_ROWS"
+
+# All stale rows were known false-positives — not a RED.
+if [ "$STALE_COUNT" -eq 0 ]; then
+  emit_ok "$SUPPRESSED_COUNT"
+  exit 0
+fi
 
 MSG="PRE-MARKET RED (${CT_TIME}): ${STALE_COUNT} ACTIVE strategies stale >2h (NT8 offline or DLL failure):
 ${STALE_LIST}Verify NT8 on HolyGrail before H137 window opens 9:30 ET.${ZOMBIE_NOTE}"
@@ -126,4 +163,4 @@ else
   SEV="warning"
 fi
 cortextos bus log-event error premarket_stale_strategies "$SEV" \
-  --meta "{\"stale_count\":${STALE_COUNT},\"fresh_count\":${ACTIVE_FRESH:-0},\"zombie_count\":${ZOMBIE_COUNT:-0},\"pilot_p0\":${PILOT_P0}}" 2>/dev/null || true
+  --meta "{\"stale_count\":${STALE_COUNT},\"fresh_count\":${ACTIVE_FRESH:-0},\"zombie_count\":${ZOMBIE_COUNT:-0},\"suppressed_count\":${SUPPRESSED_COUNT},\"pilot_p0\":${PILOT_P0}}" 2>/dev/null || true
