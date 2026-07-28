@@ -150,6 +150,7 @@ check_http() {
 
 check_http "dashboard" "https://dashboard.profithits.app/api/v1/health"
 check_http "status" "https://status.profithits.app/api/strategies"
+check_http "files" "https://files.profithits.app/health"
 
 # --- 5. bus ----------------------------------------------------------------
 if BUS_OUT=$(timeout 30 "$CORTEXTOS_BIN" bus check-inbox 2>&1); then
@@ -160,9 +161,9 @@ fi
 
 # --- report ----------------------------------------------------------------
 if [[ ${#FAILED_NAMES[@]} -eq 0 ]]; then
-  echo "[core-health] ALL OK (5/5)"
+  echo "[core-health] ALL OK (6/6)"
   "$CORTEXTOS_BIN" bus log-event action core_service_health_ok info \
-    --meta "$(printf '{"kb_latency_ms":%s,"kb_results":%s,"checked":5}' "$KB_MS" "$KB_RESULTS")" \
+    --meta "$(printf '{"kb_latency_ms":%s,"kb_results":%s,"checked":6}' "$KB_MS" "$KB_RESULTS")" \
     2>/dev/null || true
   exit 0
 fi
@@ -171,7 +172,7 @@ FAILED_CSV=$(IFS=,; echo "${FAILED_NAMES[*]}")
 DETAIL_BLOCK=$(printf '%s\n' "${FAILED_DETAILS[@]}")
 
 SEVERITY="error"
-HEADER="🔴 Core service check FAILED — ${CT_TIME}"
+HEADER="🔴 Core service check FAILED — ${CT_TIME} (${#FAILED_NAMES[@]}/6)"
 INCIDENT_LINE=""
 if [[ ${#INCIDENT_NAMES[@]} -gt 0 ]]; then
   SEVERITY="critical"
