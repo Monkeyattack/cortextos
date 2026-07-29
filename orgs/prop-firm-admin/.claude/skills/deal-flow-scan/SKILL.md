@@ -309,9 +309,9 @@ cortextos bus send-message workspace normal 'Label these Gmail threads "deal-ing
 After every scan (cron or on-demand):
 
 ```bash
-# Log completion event
-cortextos bus log-event research_completed \
-  --desc "deal-flow-scan: N deals scanned, M PURSUE, K WATCH, P PASS"
+# Log completion event — signature is <category> <event> <severity> [--meta json], NOT --desc
+cortextos bus log-event milestone research_completed info \
+  --meta '{"desc":"deal-flow-scan: N deals scanned, M PURSUE, K WATCH, P PASS"}'
 
 # Daily memory note
 # Append to memory/YYYY-MM-DD.md:
