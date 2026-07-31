@@ -1,6 +1,6 @@
 # H137 BilateralBreakout
 
-**Pack version:** 1.0.0 | **Status tier:** VALIDATED
+**Pack version:** 1.0.1 | **Status tier:** VALIDATED
 **Last updated:** 2026-07-30 | **Gate stamp:** pending fable-reviewer
 
 ---
@@ -57,10 +57,10 @@ Three exit types, in priority order:
 **Skip Mondays:** `SkipMondays=true` — strategy does not trade Monday sessions. This matches backtest SKIP_DAYS={0} (Python Monday). Code built+stamped 826dc4d3; requires Chris recompile before taking effect.
 
 **Official series (post-exclusion-ruling 2026-07-29):**
-- Valid days: 4/30 (as of 2026-07-30)
-- Record: 4W / 0L
-- Pilot P&L: +$207.50
-- Connected fleet P&L: +$253.75 (today's trade)
+- Valid days: query trades DB — `SELECT COUNT(*) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL` (do not hardcode count — use DB as source of truth)
+- Target: 30 valid days
+- Record as of 2026-07-30: 4W / 0L
+- Pilot P&L as of 2026-07-30: +$207.50
 - Days 9+10 excluded: all-manual exits by Chris (fleet made +$90 / +$1,500 under manual management, tracked separately)
 
 **Payout thresholds (minimum win filters do NOT apply — these are payout minimums):**
