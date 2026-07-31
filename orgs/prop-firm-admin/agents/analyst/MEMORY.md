@@ -179,3 +179,13 @@ Workers spawned during a session die silently when the daily-context-reset fires
 - **strategy_states.state = Active ≠ open position:** Multiple agents (devops tripwire, my own mental model) got this wrong. Active = strategy loaded and running. Open position = trades.exit_time IS NULL. Never conflate.
 - **orgs/ gitignore requires git add -f for new files:** Already-tracked files in orgs/ show up in git status. New files (like a new pack directory) require `git add -f` to force-track despite the gitignore. Auto-commit will not pick them up otherwise.
 - **Pack governance cadence is fast:** v1.0.0 → v1.0.2 in under 2 hours. Plan for multiple rounds with fable-reviewer on any DB-backed doc. Build time buffer accordingly.
+
+## H137 Live Fix — 2026-07-31 (374f375, orbfutures repo)
+Chris committed 374f375 to orbfutures master on Jul 31 16:00 UTC. H137_BilateralBreakout.cs +81/-11. Three live/backtest divergences corrected:
+1. **SkipMondays → SkipFridays** — live was skipping the wrong day (trading Fridays, skipping Mondays)
+2. **VIX<22 gate added** — live had NO VIX filter; backtest gates on VIX>=22. Fail-open when VIX unavailable.
+3. **Range window includes 10:30 bar** — live used Minute<30 (exclusive), dropping final bar every session
+Requires NT8 recompile before next trading session (Mon Aug 4). Prior "826dc4d3" was a ghost commit (lost at worker reset, never existed in repo) — superseded by this fix.
+
+## H137 Series — Exclusion Ruling 2026-07-31
+Today (Friday Jul 31) H137 traded 4 accounts (4W/0L, +$730 fleet / +$48.75 pilot) due to the SkipFridays bug. Two design deviations were active: (1) wrong skip day (Friday) and (2) no VIX gate. Chief ruling: exclusion table, same logic as Days 9+10. Holding series at 4/30 pending Chris morning brief confirm. PAAPEX4333770000002 confirmed as new H137 fleet account. Also note: PAAPEX4333770000002 had bare exit (no exit_signal) today — flag for review if series counting question resurfaces.
