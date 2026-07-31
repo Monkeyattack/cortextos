@@ -1,9 +1,10 @@
 # Strategies Domain Pack — Index
 
-**Pack version:** 1.0.1
+**Pack version:** 1.0.2
 **Created:** 2026-07-30 by analyst (Rex)
 **Gate:** fable-reviewer stamp required per doc before fleet load
-**Changelog:** v1.0.1 — H137 series count now references DB as source of truth (not hardcoded)
+**Changelog:** v1.0.2 — insert missing h137_trade_exclusions rows (Jul 27 + Jul 29); add exclusion-rule note (bare-Close ≠ auto-exclude; Jul 24 precedent)
+v1.0.1 — H137 series count now references DB as source of truth (not hardcoded)
 v1.0.0 — initial pack, 10 strategies documented
 
 ---
