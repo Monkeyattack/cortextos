@@ -983,7 +983,7 @@ export class AgentManager {
   /**
    * Spawn an ephemeral worker session for a parallelized task.
    */
-  async spawnWorker(name: string, dir: string, prompt: string, parent?: string, model?: string): Promise<void> {
+  async spawnWorker(name: string, dir: string, prompt: string, parent?: string, model?: string, runtime?: string): Promise<void> {
     if (this.workers.has(name)) {
       throw new Error(`Worker "${name}" is already running`);
     }
@@ -992,7 +992,7 @@ export class AgentManager {
     }
 
     const log = (msg: string) => console.log(`[worker:${name}] ${msg}`);
-    const worker = new WorkerProcess(name, dir, parent, log);
+    const worker = new WorkerProcess(name, dir, parent, log, runtime);
 
     const env: CtxEnv = {
       instanceId: this.instanceId,
