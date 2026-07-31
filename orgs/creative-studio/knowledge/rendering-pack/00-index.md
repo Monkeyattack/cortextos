@@ -1,9 +1,11 @@
 # Rendering Domain Pack — Index
 
-**Pack version:** 1.0.0
+**Pack version:** 1.0.1
 **Created:** 2026-07-30 by ma_studio_agency
 **Gate:** fable-reviewer stamp required before fleet load
-**Changelog:** v1.0.0 — initial pack, canon asset inventory
+**Changelog:**
+- v1.0.1 — channels.md schema corrected (PK is `id`, added tts_provider/voxtral_voice_id/outro_video_path/blotato_accounts); templates.md quote-short format clarified (master 1920x1080, portrait variants derived per platform)
+- v1.0.0 — initial pack, canon asset inventory
 
 ---
 
