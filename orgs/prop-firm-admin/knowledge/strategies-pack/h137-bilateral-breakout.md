@@ -1,7 +1,7 @@
 # H137 BilateralBreakout
 
-**Pack version:** 1.0.2 | **Status tier:** VALIDATED
-**Last updated:** 2026-07-30 | **Gate stamp:** pending fable-reviewer
+**Pack version:** 1.0.4 | **Status tier:** VALIDATED
+**Last updated:** 2026-07-31 | **Gate stamp:** pending fable-reviewer re-stamp
 
 ---
 
@@ -54,21 +54,19 @@ Three exit types, in priority order:
 
 ## Gate status and series (VALIDATED)
 
-**Skip Mondays:** `SkipMondays=true` — strategy does not trade Monday sessions. This matches backtest SKIP_DAYS={0} (Python Monday). Code built+stamped 826dc4d3; requires Chris recompile before taking effect.
+**Skip Fridays:** `SKIP_FRIDAYS = True` (backtest variable name, `pd.dayofweek == 4`) — strategy does not trade Friday sessions. Fix committed 374f375 (orbfutures master, Jul 31 16:00 UTC) — also adds VIX<22 gate (backtest: `VIX_MAX = 22.0`) and corrects range window to include 10:30 bar. Prior live code had SkipMondays (wrong) + no VIX gate + range excluded 10:30 bar. **Requires NT8 recompile before Mon Aug 4.** Prior stamped SkipMondays artifact (stamp 826dc4d3) voided by fable-reviewer 2026-07-31, superseded by 374f375.
 
 **Official series (post-exclusion-ruling 2026-07-29):**
-- Valid days: query trades DB — `SELECT COUNT(*) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL` (do not hardcode count — use DB as source of truth; confirmed returns 4 as of 2026-07-30)
-- **Exclusion rule:** exclusions are ruling-recorded in `h137_trade_exclusions`; bare-Close exit_signal is a flag for review, NOT auto-exclusion (Jul 24 precedent: bare-Close trade id=57282 +$48.75 counted VALID per 2026-07-29 ruling). Do not filter on exit_signal to compute the series count.
+- Valid days: query trades DB — `SELECT COUNT(*) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL` (do not hardcode count — use DB as source of truth)
+- **Series treatment: PENDING Chris ruling (as of 2026-07-31).** Two validity axes apply: (1) *Execution integrity* — answered by exclusion table: bare-Close exit_signal = flag for review; strategy-named exit (H137_Long_EOD, H137_Long_TimeExit) = execution-valid. Do not filter on exit_signal to compute the series count. (2) *Config conformance* — whether trades on days the validated config would have skipped (Fridays: Jul 24 + Jul 31) count toward the series. Chris ruling pending: options are (a) restart at 0/30, (b) annotate Friday-day trades separately and count only conformant days, or (c) re-baseline from 374f375 recompile. Do not bake a count into this doc until Chris decides.
 - Target: 30 valid days
-- Record as of 2026-07-30: 4W / 0L
-- Pilot P&L as of 2026-07-30: +$207.50
 - Days 9+10 excluded: all-manual exits by Chris (fleet made +$90 / +$1,500 under manual management, tracked separately)
 
 **Payout thresholds (minimum win filters do NOT apply — these are payout minimums):**
 - MFF: $150 minimum per payout
 - Apex: $50 minimum per payout
 
-**Why 4/30 and not higher:** Strategy launched post-MaxHold fix (480min, was 120min). Clean series started after that recompile.
+**Note on current count:** Series count intentionally omitted pending Chris ruling on Friday config-conformance question. Query the DB directly for current valid-day count.
 
 ## Performance
 
