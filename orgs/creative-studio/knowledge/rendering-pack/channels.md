@@ -6,14 +6,18 @@ Source of truth: `aitheist` PostgreSQL DB (127.0.0.1:5432) + Postiz DB (postiz-p
 
 ## AI Theist DB — channels table
 
-| channel_id | name | heygen_avatar_id | elevenlabs_voice_id | brand_color | target_platforms |
-|-----------|------|-----------------|-------------------|-------------|-----------------|
-| ai-theist | AI Theist | Abigail_expressive_2024112501 | (none) | #888888 | youtube |
-| chris-meredith | Chris Meredith | (none) | kyj06yo9f25k | #1a1a2e | youtube |
-| phantom-findings | Phantom Findings | (none) | (none) | #3d1a5c | youtube, tiktok |
-| wendy-recap | WendyRECAP | Abigail_expressive_2024112501 | (none) | #FF6B6B | youtube |
+Primary key: `id` (varchar 64). Note: `channel_id` is the FK column name on the jobs table (not a channels column).
 
-**Schema columns (jobs table):** id (uuid), source_url, source_platform, extracted_text, script (jsonb), status, input_type (url/text/script), channel_id, thumbnails (jsonb), series_metadata (jsonb)
+| id | name | tts_provider | elevenlabs_voice_id | voxtral_voice_id | heygen_avatar_id | brand_color | target_platforms | outro_video_path | blotato_accounts |
+|----|------|-------------|-------------------|-----------------|-----------------|-------------|-----------------|-----------------|-----------------|
+| ai-theist | AI Theist | xai | (none) | en_paul_neutral | Abigail_expressive_2024112501 | #888888 | youtube | /mnt/r2/videos/assets/aitheist/Outro.mp4 | {} |
+| chris-meredith | Chris Meredith | elevenlabs | kyj06yo9f25k | onyx | (none) | #1a1a2e | youtube | (none) | {"youtube": "39156"} |
+| phantom-findings | Phantom Findings | xai | (none) | (none) | (none) | #3d1a5c | youtube, tiktok | (none) | {"tiktok": "4064", "youtube": "2368"} |
+| wendy-recap | WendyRECAP | openai | (none) | (none) | Abigail_expressive_2024112501 | #FF6B6B | youtube | /mnt/r2/videos/assets/wendy/outtro-landscape.mp4 | {"youtube": "32114"} |
+
+**Full channels schema (rendering-relevant columns):** id, name, brand_color, voice_style, hook_style, cta, personality_traits (jsonb), elevenlabs_voice_id, heygen_voice_id, heygen_avatar_id, icon_path, watermark_path, outro_video_path, intro_video_path, target_platforms (jsonb), custom_prompt, active, blotato_accounts (jsonb), tts_provider, video_provider, voxtral_voice_id
+
+**Schema columns (jobs table):** id (uuid), source_url, source_platform, extracted_text, script (jsonb), status, input_type (url/text/script), channel_id (FK to channels.id), thumbnails (jsonb), series_metadata (jsonb)
 
 **job_status enum:** ingested, classified, scripted, rendered, published, error
 

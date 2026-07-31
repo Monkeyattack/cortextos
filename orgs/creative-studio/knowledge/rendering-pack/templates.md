@@ -43,11 +43,13 @@ Each channel template directory contains:
 
 ## Quote-Short Template Spec (chris-meredith)
 
-- **Format:** 1920x1080 (landscape, fps 24) per aitheist DB render job meta
+- **Master composition:** 1920x1080 at 24fps (confirmed from job c0cdc641 render meta)
+- **Platform variants:** portrait 9:16 (1080x1920) derived per platform — tiktok.mp4 and instagram_reels.mp4 are generated from the master; do not canonize "landscape" as the only quote-short format
 - **Quote text:** rendered as HTML overlay in body.template.html
 - **Attribution:** rendered via lower-third.template.html
-- **Voice:** ElevenLabs `kyj06yo9f25k`
+- **Voice:** ElevenLabs `kyj06yo9f25k` (tts_provider: elevenlabs; fallback voxtral: onyx)
 - **Brand color:** `#1a1a2e`
 - **Distribution:** youtube (primary), linkedin (cms855no70001ntcbvg3ig0my)
+- **Blotato account:** youtube `39156`
 
 **Dispatch rule:** all quote-short jobs for chris-meredith channel MUST reference `templates/hf/` root directory. Jobs that skip this reference are blocked at pre-render gate (once devops wires the check).
