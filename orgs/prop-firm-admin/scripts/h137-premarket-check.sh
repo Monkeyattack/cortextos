@@ -23,6 +23,7 @@ PILOT_STRATEGY="H137_BilateralBreakout"
 # Each entry MUST carry a reason and a removal condition.
 SUPPRESSED_PAIRS=(
   'PPNTF100024895000002|MarketOpenFlip'  # tombstone-gap: detached strategy, pending Chris decision — remove when task_1784882768044 ships
+  'APEX4333770000091|MarketOpenFlip'     # tombstone-gap: strategy removed from live state 2026-07-30, matches PPNTETL roster adjustment pattern — remove after Chris confirms in morning brief
 )
 
 is_suppressed() {
