@@ -1092,6 +1092,14 @@ export class AgentManager {
     if (!worker) {
       throw new Error(`Worker "${name}" not found`);
     }
+    // Write a .user-stop marker before killing the PTY so the SessionEnd hook
+    // classifies this as an intentional stop rather than a crash, suppressing
+    // false-positive crash notifications to chief/analyst.
+    const stateDir = join(this.ctxRoot, 'state', name);
+    try {
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(join(stateDir, '.user-stop'), 'worker terminated by terminate-worker');
+    } catch { /* best-effort — if this fails, a false crash alert is preferable to a hard error */ }
     await worker.terminate();
     this.workers.delete(name);
   }
