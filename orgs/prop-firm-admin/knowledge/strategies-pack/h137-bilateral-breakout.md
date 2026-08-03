@@ -54,7 +54,7 @@ Three exit types, in priority order:
 
 ## Gate status and series (VALIDATED)
 
-**Skip Fridays:** `SKIP_FRIDAYS = True` (backtest variable name, `pd.dayofweek == 4`) — strategy does not trade Friday sessions. Fix committed 374f375 (orbfutures master, Jul 31 16:00 UTC) — also adds VIX<22 gate (backtest: `VIX_MAX = 22.0`) and corrects range window to include 10:30 bar. Prior live code had SkipMondays (wrong) + no VIX gate + range excluded 10:30 bar. **NT8 recompile DONE — Chris confirmed 2026-08-01 8:37 PM CT; Mon Aug 4 trades under corrected config (SkipFridays+VIX22+range).** Prior stamped SkipMondays artifact (stamp 826dc4d3) voided by fable-reviewer 2026-07-31, superseded by 374f375.
+**Skip Fridays:** `SKIP_FRIDAYS = True` (backtest variable name, `pd.dayofweek == 4`) — strategy does not trade Friday sessions. Fix committed 374f375 (orbfutures master, Jul 31 16:00 UTC) — also adds VIX<22 gate (backtest: `VIX_MAX = 22.0`) and corrects range window to include 10:30 bar. Prior live code had SkipMondays (wrong) + no VIX gate + range excluded 10:30 bar. **NT8 recompile DONE — Chris confirmed 2026-08-01 8:37 PM CT (chief relay). First corrected-config session: Mon Aug 3 (my prior "Mon Aug 4" was a day-of-week error — Aug 4 is Tuesday; caught by devops).** Prior stamped SkipMondays artifact (stamp 826dc4d3) voided by fable-reviewer 2026-07-31, superseded by 374f375.
 
 **Official series (post-exclusion-ruling 2026-07-29):**
 - Valid days: query trades DB — `SELECT COUNT(*) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL` (do not hardcode count — use DB as source of truth; returns 5 as of 2026-07-31)
