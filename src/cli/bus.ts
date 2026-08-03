@@ -1494,7 +1494,14 @@ busCommand
       for (const org of readdirSync(orgsDir)) {
         const agentsDir = join(orgsDir, org, 'agents');
         if (!existsSync(agentsDir)) continue;
-        for (const name of readdirSync(agentsDir)) {
+        // Mirror the filter in bus/agents.ts listAgents(): agent names are
+        // [a-z0-9_-] only, and must be real directories. Without this, macOS
+        // AppleDouble sidecars (._accounts, ._chief, ...) get counted as agents
+        // and inflate every coverage denominator computed off this command.
+        for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
+          const name = entry.name;
+          if (!entry.isDirectory()) continue;
+          if (!/^[a-z0-9_-]+$/.test(name)) continue;
           if (!agentMap[name]) agentMap[name] = { org, enabled: true };
         }
       }
