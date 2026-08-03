@@ -13,7 +13,7 @@
       "name": "heartbeat",
       "type": "recurring",
       "interval": "4h",
-      "prompt": "Read HEARTBEAT.md and follow its instructions. Update your heartbeat, check inbox, and work on your highest priority task."
+      "prompt": "Read HEARTBEAT.md and follow its instructions. Update your heartbeat, check inbox, pull your assigned PM tasks in priority order, fan independent ones out to workers, and close what you finish with evidence."
     }
   ]
 }

@@ -35,20 +35,53 @@ cortextos bus ack-inbox "<message_id>"
 
 Un-ACK'd messages are re-delivered after 5 minutes. Target: 0 un-ACK'd after this sweep.
 
-## Step 3: Check task queue + stale task detection
+## Step 3: Pull your PM work queue
 
-Full reference: `.claude/skills/tasks/SKILL.md`
+**PM is the work queue. The local bus task store is operational only.**
+
+These are two different systems that share an ID format — filing SOW work in the bus store
+makes it invisible to the SOW. Deliverable work goes in PM; ephemeral operational notes
+(cron ran, sweep clean) stay in the bus store.
 
 ```bash
-cortextos bus list-tasks --agent $CTX_AGENT_NAME --status pending
-cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
+PM_API_KEY=$(grep PM_API_KEY /home/claude-dev/repos/pm-system/.env | cut -d= -f2 | tr -d '"')
+curl -s "https://pm.profithits.app/api/tasks?assignee=$CTX_AGENT_NAME" \
+  -H "x-api-key: $PM_API_KEY" | python3 -c "
+import json,sys
+ts=[t for t in json.load(sys.stdin) if t.get('status') in ('pending','in_progress')]
+ts.sort(key=lambda t:(t.get('due_date') or '9999', t.get('created_at') or ''))
+for t in ts: print(t['status'], t.get('due_date','no-due'), t['id'], t['title'][:70])"
 ```
 
-- If you have pending tasks: pick the highest priority one
-- If you have in_progress tasks older than 2 hours: either complete them NOW or update their status with a note
-- If you have NO tasks: check GOALS.md for objectives, then message the orchestrator
+- **Overdue or due today** outranks everything else. Work it or flag it — never let it pass silently.
+- **in_progress older than 2 hours** with no commit or artifact behind it: close it or say why it stalled.
+- **No PM tasks at all**: check GOALS.md, then message the orchestrator. Do not invent work.
 
 Stale tasks are visible on the dashboard. They make you look broken.
+
+### Fan-out plan (required before you start)
+
+Before working the queue, decide what gets delegated. **Independent tasks run in parallel or you
+are wasting the fleet.**
+
+For each task, ask: does it depend on the output of another task in this queue? If no, it is
+independent and eligible for a worker.
+
+```bash
+cortextos spawn-worker <name> --runtime codex --task "<focused task + acceptance criteria>"
+```
+
+- **`--runtime codex` is the default** for pure-code work. Use `claude` only for architecture
+  review, cortextOS PRs, or content judgment.
+- Give the worker a **slim bootstrap**: the one task, its acceptance criteria, and the paths it
+  needs. Do not hand it your whole context.
+- **Every spawn gets a PM task recorded immediately** — worker name, what it is doing, expected
+  completion. That is the crash-recovery record.
+- Your own context is for coordination, gates, and comms. Not for work a worker can do.
+
+**Serial-work detector — if all of the following are true, you are doing it wrong:**
+you hold 2+ independent PM tasks, you have spawned no workers, and your last worker spawn was
+over 24 hours ago. Stop and fan out before continuing.
 
 ## Step 4: Log heartbeat event
 
@@ -85,21 +118,34 @@ Read GOALS.md. Goals are refreshed daily by the orchestrator each morning.
 - If goals are stale (>24h without update): message the orchestrator to request fresh goals
 - If you have no goals: message the orchestrator immediately. Don't idle.
 
-## Step 7: Resume work
+## Step 7: Work the queue, close with evidence
 
 Full reference: `.claude/skills/tasks/SKILL.md`
 
-Pick your highest priority task and work on it. Tasks should trace back to your current goals.
+Work the PM queue from Step 3 in the order you sorted it, with the delegated tasks already
+running in workers. Every task traces back to a SOW milestone — if one does not, it does not
+belong in PM.
 
 When starting:
 ```bash
-cortextos bus update-task "<task_id>" in_progress
+curl -s -X PATCH "https://pm.profithits.app/api/tasks/<task_id>" \
+  -H "x-api-key: $PM_API_KEY" -H "Content-Type: application/json" \
+  -d '{"status":"in_progress"}'
 ```
 
-When done:
+When done — **a close needs a real artifact, not a claim**:
 ```bash
-cortextos bus complete-task "<task_id>" --result "<summary of what was produced>"
+curl -s -X PATCH "https://pm.profithits.app/api/tasks/<task_id>" \
+  -H "x-api-key: $PM_API_KEY" -H "Content-Type: application/json" \
+  -d '{"status":"completed","description":"<prior description>\n\nDONE <UTC>: <what changed> | EVIDENCE: <commit SHA / URL / file path / verbatim command + output>"}'
 ```
+
+Valid evidence is a commit SHA, a URL that returns 200, a file path that exists, or a command
+with its output. Spec text, a restatement of the plan, or "PROOF: X" as a placeholder are not
+evidence and get reverted in sweeps.
+
+**Report SOW progress, not activity.** At the end of the cycle, state which milestone moved and
+by how much — "M3 3/7, parallel-dispatch closed" beats "worked on tasks."
 
 If you are blocked, see `.claude/skills/human-tasks/SKILL.md` for the human task and approval workflow.
 If you need an approval before acting, see `.claude/skills/approvals/SKILL.md`.
