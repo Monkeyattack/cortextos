@@ -37,7 +37,7 @@ Un-ACK'd messages are re-delivered after 5 minutes. Target: 0 un-ACK'd after thi
 
 If any of those messages were Telegram-shape (`=== TELEGRAM from`), you should already have replied via `cortextos bus send-telegram` when they first arrived — if not, do it NOW before continuing.
 
-## Step 3: Check task queue + stale task detection
+## Step 3: Pull your PM work queue
 
 Full reference: `plugins/cortextos-agent-skills/skills/tasks/SKILL.md`
 
@@ -46,9 +46,25 @@ cortextos bus list-tasks --agent $CTX_AGENT_NAME --status pending
 cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 ```
 
-- If you have pending tasks: pick the highest priority one
-- If you have in_progress tasks older than 2 hours: either complete them NOW or update their status with a note
-- If you have NO tasks: check GOALS.md for objectives, then message the orchestrator
+- **Pull your PM queue first** — PM is the work queue; the local bus task store is
+  operational only. Deliverable work lives in PM:
+  ```bash
+  PM_API_KEY=$(grep PM_API_KEY /home/claude-dev/repos/pm-system/.env | cut -d= -f2 | tr -d '"')
+  curl -s "https://pm.profithits.app/api/tasks?assignee=$CTX_AGENT_NAME" \
+    -H "x-api-key: $PM_API_KEY" | python3 -c "
+  import json,sys
+  ts=[t for t in json.load(sys.stdin) if t.get('status') in ('pending','in_progress')]
+  ts.sort(key=lambda t:(t.get('due_date') or '9999', t.get('created_at') or ''))
+  for t in ts: print(t['status'], t.get('due_date','no-due'), t['id'], t['title'][:70])"
+  ```
+- **Overdue or due today outranks everything.** Work it or flag it — never let it pass silently.
+- **Fan out before you start.** Any PM task that does not depend on another task's output goes
+  to a worker: `cortextos spawn-worker <name> --runtime codex --task "<task + acceptance criteria>"`.
+  Codex is the default for pure-code work; claude only for architecture review, cortextOS PRs, or
+  content judgment. Give the worker a slim bootstrap — the task, its acceptance criteria, the paths
+  it needs. Record every spawn as a PM task immediately; that is the crash-recovery record.
+- **Serial-work detector:** 2+ independent PM tasks, no workers spawned, and 24h since your last
+  spawn means you are doing it wrong. Stop and fan out.
 
 ## Step 4: Log heartbeat event
 
@@ -89,7 +105,22 @@ Read GOALS.md. Goals are refreshed daily by the orchestrator each morning.
 
 Full reference: `plugins/cortextos-agent-skills/skills/tasks/SKILL.md`
 
-Pick your highest priority task and work on it. Tasks should trace back to your current goals.
+Work the PM queue in the order you sorted it, with delegated tasks already running in workers.
+Every task traces back to a SOW milestone — if it does not, it does not belong in PM.
+
+**A close needs a real artifact, not a claim.** Valid evidence is a commit SHA, a URL that
+returns 200, a file path that exists, or a command with its output. Spec text and "PROOF: X"
+placeholders are not evidence and get reverted in sweeps.
+
+```bash
+curl -s -X PATCH "https://pm.profithits.app/api/tasks/<task_id>" \
+  -H "x-api-key: $PM_API_KEY" -H "Content-Type: application/json" \
+  -d '{"status":"completed","description":"<prior>
+
+DONE <UTC>: <what changed> | EVIDENCE: <SHA/URL/path/cmd+output>"}'
+```
+
+**Report SOW progress, not activity** — "M3 3/7, parallel-dispatch closed" beats "worked on tasks".
 
 When starting:
 ```bash

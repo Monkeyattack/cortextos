@@ -223,7 +223,7 @@ echo "Day starts: ${DAY_HOUR}:00, Night starts: ${NIGHT_HOUR}:00"
 **Set up the heartbeat cron as a persistent cron (survives restarts):**
 
 ```bash
-cortextos bus add-cron $CTX_AGENT_NAME heartbeat 4h Read HEARTBEAT.md and follow its instructions. Update your heartbeat, check inbox, and work on your highest priority task.
+cortextos bus add-cron $CTX_AGENT_NAME heartbeat 4h Read HEARTBEAT.md and follow its instructions. Update your heartbeat, check inbox, pull your assigned PM tasks in priority order, fan independent ones out to workers, and close what you finish with evidence.
 ```
 
 Check whether `nightly-metrics` is already registered (it should be in config.json by default — the migration will carry it over):

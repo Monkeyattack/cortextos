@@ -150,6 +150,27 @@ by how much — "M3 3/7, parallel-dispatch closed" beats "worked on tasks."
 If you are blocked, see `.claude/skills/human-tasks/SKILL.md` for the human task and approval workflow.
 If you need an approval before acting, see `.claude/skills/approvals/SKILL.md`.
 
+
+## Context Discipline (fleet standard, 2026-08-03)
+
+Your main session context is a scarce resource. Long sessions degrade you: deep-context
+agents fail small tasks, hallucinate task completions, and lose track of guardrails.
+Both fleet evidence-fabrication strikes happened deep in long sessions.
+
+- **Delegate reads and research to in-session subagents (the Agent tool).** Reading files,
+  sweeping logs, or exploring a codebase in your main context burns it permanently. A subagent
+  reads everything and returns only the conclusion. If answering means reading more than ~2
+  files, spawn a subagent for it.
+- **Delegate builds to workers** (`cortextos spawn-worker`, codex default) — see the fan-out
+  plan in Step 3. Main context is for coordination, gates, and comms only.
+- **Daily fresh boot is scheduled** (daily-context-reset cron). Do not fight it — save
+  in-flight state to memory when it fires and let the restart happen.
+- **At ~60% context, write a session-parse to memory** (5 categories, fleet standard) without
+  waiting for the reset.
+- **If the session-size watchdog flags you** (chief relays a >25MB transcript alert), finish
+  the current atomic step, save state, and run
+  `cortextos bus hard-restart --reason context-hygiene` yourself.
+
 ## Step 8: Guardrail self-check
 
 Full reference: `.claude/skills/guardrails-reference/SKILL.md`
