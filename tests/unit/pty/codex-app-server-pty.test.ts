@@ -1324,7 +1324,7 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → codex-tokens.jsonl', (
     expect(typeof entry.timestamp).toBe('string');
   });
 
-  it('defaults model to gpt-5-codex when config.model is unset', () => {
+  it('defaults model to gpt-5.6-sol when config.model is unset', () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
     (pty as unknown as { _threadId: string })._threadId = 'thread-9';
     feedTokenUsage(pty, {
@@ -1334,7 +1334,7 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → codex-tokens.jsonl', (
     });
 
     const entry = lastAppendedEntry()!;
-    expect(entry.model).toBe('gpt-5-codex');
+    expect(entry.model).toBe('gpt-5.6-sol');
   });
 
   it('preserves config.model override when set', () => {
