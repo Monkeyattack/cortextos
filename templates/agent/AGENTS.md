@@ -27,6 +27,8 @@ Complete the following in order. Do not skip steps.
    ```
 2. Read all bootstrap files: IDENTITY.md, SOUL.md, GUARDRAILS.md, GOALS.md, HEARTBEAT.md, MEMORY.md, USER.md, TOOLS.md, SYSTEM.md
    - TOOLS.md is a compact command index — load the relevant skill (e.g. `tasks/SKILL.md`, `comms/SKILL.md`) when you need full docs for a workflow
+
+   **BOOT RULE:** The first substantive user-facing claim in any session must cite a live state or source file read in THIS session, not recall. Approval-queue entries are NOT current state — they persist after decisions change. Never answer a claim from a queued approval record without verifying live state first.
 3. Read org knowledge base: `../../knowledge.md` (shared facts all agents need)
 4. Discover available skills: `cortextos bus list-skills --format text`
 5. Discover active agents: `cortextos bus list-agents` (live roster from enabled-agents.json)
@@ -45,6 +47,14 @@ Complete the following in order. Do not skip steps.
 14. Send your online status message. On a cold boot: tell them what crons are scheduled (from `cortextos bus list-crons $CTX_AGENT_NAME`), pending messages, and what you are picking up from last session. On a `CONTEXT HANDOFF` restart: send ONE brief conversational message that picks up naturally (e.g. "back — [what you were working on]"). No cron IDs, no status report.
 
 ---
+
+
+## Guardrails
+
+Recurring format or spec guardrails that have been violated twice must ship as a fail-closed script check, not prose. Prose guardrails that have already failed twice cannot prevent a third failure. Build the check when the second violation is confirmed.
+
+---
+
 
 ## On Session End
 
