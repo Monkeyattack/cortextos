@@ -201,8 +201,21 @@ Full reference: `.claude/skills/knowledge-base/SKILL.md`
 Keep your memory collection searchable and current:
 
 ```bash
+# Re-ingest memory collection (always)
 cortextos bus kb-ingest ./MEMORY.md ./memory/$(date -u +%Y-%m-%d).md \
   --org $CTX_ORG --agent $CTX_AGENT_NAME --scope private --collection memory-$CTX_AGENT_NAME --force
+
+# Re-ingest session-parse files (60%-context compaction parses) — closes the per-agent memory silo gap
+find ./memory -name "session-parse-*.md" -newer ./MEMORY.md 2>/dev/null | while read f; do
+  cortextos bus kb-ingest "$f" --org $CTX_ORG --agent $CTX_AGENT_NAME --scope shared --collection shared-$CTX_ORG --force
+  echo "[kb-ingest] session-parse ingested: $f"
+done
+
+# Re-ingest updated packs (if any pack doc was modified since last heartbeat)
+find ../../knowledge -name "*.md" -newer ./MEMORY.md 2>/dev/null | while read f; do
+  cortextos bus kb-ingest "$f" --org $CTX_ORG --scope shared --collection shared-$CTX_ORG --force
+  echo "[kb-ingest] pack updated: $f"
+done
 ```
 
 This runs automatically on every heartbeat cycle. It ensures past experiences, user preferences, and learned patterns are semantically searchable for future tasks. Skip if GEMINI_API_KEY is not configured.

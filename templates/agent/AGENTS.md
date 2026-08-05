@@ -29,6 +29,17 @@ Complete the following in order. Do not skip steps.
    - TOOLS.md is a compact command index — load the relevant skill (e.g. `tasks/SKILL.md`, `comms/SKILL.md`) when you need full docs for a workflow
 
    **BOOT RULE:** The first substantive user-facing claim in any session must cite a live state or source file read in THIS session, not recall. Approval-queue entries are NOT current state — they persist after decisions change. Never answer a claim from a queued approval record without verifying live state first.
+2.5. Load your role-specific knowledge packs. Run:
+   ```bash
+   # List available packs for your org
+   ls ../../knowledge/ 2>/dev/null && ls ../../knowledge/strategies-pack/ 2>/dev/null
+   ```
+   Then read the index files relevant to your role:
+   - **All agents**: `../../knowledge/00-prop-firm-index.md` (prop firm rules, account tiers, limits)
+   - **Strategy-aware agents** (analyst, devops, fable-reviewer): `../../knowledge/strategies-pack/00-index.md` (strategy roster + language tiers)
+   - **Role-specific packs**: if your role involves a specific domain (trading, content, infra), load that pack. When Chris or chief asks a strategy question, you must have read the pack — not recalled from memory.
+
+   **PACK RULE:** A question about a strategy, account rule, or project status is NEVER answered from recall. Read the pack doc first, then answer.
 3. Read org knowledge base: `../../knowledge.md` (shared facts all agents need)
 4. Discover available skills: `cortextos bus list-skills --format text`
 5. Discover active agents: `cortextos bus list-agents` (live roster from enabled-agents.json)
@@ -45,6 +56,11 @@ Complete the following in order. Do not skip steps.
 12. Log session start: `cortextos bus log-event action session_start info --meta '{"agent":"'$CTX_AGENT_NAME'"}'`
 13. Write session start entry to daily memory (see Memory Protocol below)
 14. Send your online status message. On a cold boot: tell them what crons are scheduled (from `cortextos bus list-crons $CTX_AGENT_NAME`), pending messages, and what you are picking up from last session. On a `CONTEXT HANDOFF` restart: send ONE brief conversational message that picks up naturally (e.g. "back — [what you were working on]"). No cron IDs, no status report.
+15. Read the tail of your action ledger (last 10 entries):
+   ```bash
+   tail -10 memory/action-ledger.jsonl 2>/dev/null || echo "no ledger yet"
+   ```
+   The ledger records every outward action you take. Use it to answer "did I post X?", "did I send Y?", "did I deploy Z?" with evidence, not recall.
 
 ---
 
@@ -52,6 +68,24 @@ Complete the following in order. Do not skip steps.
 ## Guardrails
 
 Recurring format or spec guardrails that have been violated twice must ship as a fail-closed script check, not prose. Prose guardrails that have already failed twice cannot prevent a third failure. Build the check when the second violation is confirmed.
+
+---
+
+
+## Answer Protocol
+
+Before answering a factual question, look up the answer — do not recall it. The question type determines where to look:
+
+| Question type | Lookup before answering |
+|---|---|
+| "Did I / did the agent post/send/deploy/merge X?" | `grep` the action ledger (`memory/action-ledger.jsonl`) + verify the live service |
+| "What is the status of strategy X?" | Read `../../knowledge/strategies-pack/<strategy-slug>.md` first |
+| "What is the status of project/milestone X?" | Read the PM SOW (`https://pm.profithits.app/api/tasks?milestone_id=<id>`) first |
+| "What are the rules for firm X?" | Read `../../knowledge/<firm>.md` or `../../knowledge/00-prop-firm-index.md` first |
+
+**NEVER answer from recall on these question types.** "I remember that..." is not a valid source. Read the current doc, then state what it says.
+
+This protocol exists because three knowledge failures (2026-07-31) were traced to agents answering from recall on questions that had live, readable sources.
 
 ---
 
@@ -409,6 +443,28 @@ cortextos bus log-event <category> <event> <severity> --meta '<json>'
 
 CONSEQUENCE: Events without logging are invisible in the Activity feed.
 TARGET: Every action in the table above = an event logged. Minimum 3 per active session.
+
+---
+
+## Action Ledger
+
+Before ANY outward action (deploy, send, post, merge, delete, financial), append a line to your ledger:
+
+```bash
+echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"action\":\"<action>\",\"target\":\"<target>\",\"detail\":\"<key params>\",\"status\":\"attempted\"}" >> memory/action-ledger.jsonl
+```
+
+After the action completes (success or failure), append the outcome:
+```bash
+echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"action\":\"<action>\",\"target\":\"<target>\",\"status\":\"<completed|failed>\",\"evidence\":\"<SHA/URL/output>\"}" >> memory/action-ledger.jsonl
+```
+
+Root cause: Postiz denial incident 2026-07-30 — agent denied own uploads because no durable record existed.
+
+Query the ledger before claiming an outward action did or did not happen:
+```bash
+grep action:<action> memory/action-ledger.jsonl | tail -5
+```
 
 ---
 
