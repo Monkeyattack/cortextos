@@ -43,7 +43,7 @@ Complete the following in order. Do not skip steps.
 3. Read org knowledge base: `../../knowledge.md` (shared facts all agents need)
 4. Discover available skills: `cortextos bus list-skills --format text`
 5. Discover active agents: `cortextos bus list-agents` (live roster from enabled-agents.json)
-6. **Crons are daemon-managed.** External crons live in `orgs/{org}/agents/{agent}/config.json` and are loaded by the daemon on start — you do not need to restore them. Use `cortextos bus list-crons $CTX_AGENT_NAME` to see what's scheduled. To add or change a cron at runtime, use the `cron-management` skill (do NOT use CronCreate or `/loop` for persistent scheduling — those are session-only).
+6. **Crons are daemon-managed.** After the one-time migration on first start, crons live in `${CTX_ROOT}/.cortextOS/state/agents/${CTX_AGENT_NAME}/crons.json` — that is what the scheduler reads. Use `cortextos bus list-crons $CTX_AGENT_NAME` to see what's scheduled. To add or change a cron at runtime, use the `cron-management` skill (do NOT use CronCreate or `/loop` for persistent scheduling — those are session-only).
 7. Recall recent session facts (cross-session memory from past compactions):
    ```bash
    cortextos bus recall-facts --days 3
@@ -374,7 +374,7 @@ The knowledge base is a semantic vector store (ChromaDB, Gemini Embedding 2). Th
 ```bash
 # Run on every heartbeat
 cortextos bus kb-ingest ./MEMORY.md ./memory/$(date -u +%Y-%m-%d).md \
-  --org $CTX_ORG --agent $CTX_AGENT_NAME --scope private --collection memory-$CTX_AGENT_NAME --force
+  --org $CTX_ORG --agent $CTX_AGENT_NAME --scope private --force
 ```
 
 **When to query — before starting any task:**
@@ -396,7 +396,7 @@ cortextos bus kb-ingest ./MEMORY.md ./memory/$(date -u +%Y-%m-%d).md \
 cortextos bus kb-query "your question" --org $CTX_ORG --agent $CTX_AGENT_NAME
 
 # Query only your memory (past experiences, patterns)
-cortextos bus kb-query "question" --org $CTX_ORG --collection memory-$CTX_AGENT_NAME
+cortextos bus kb-query "question" --org $CTX_ORG --agent $CTX_AGENT_NAME
 
 # Ingest output to your private collection
 cortextos bus kb-ingest /path/to/output --org $CTX_ORG --agent $CTX_AGENT_NAME --scope private
@@ -504,7 +504,7 @@ Always include `msg_id` as reply_to — this auto-ACKs the original. Un-ACK'd me
 
 ## Crons
 
-Crons are **daemon-managed**. The cortextOS daemon reads `orgs/{org}/agents/{agent}/config.json` on start and fires each cron by injecting its prompt into your session — no manual restoration needed.
+Crons are **daemon-managed**. After the one-time migration on first start, crons live in `${CTX_ROOT}/.cortextOS/state/agents/${CTX_AGENT_NAME}/crons.json` — the scheduler reads this file, not `config.json`. Edits to `config.json` post-migration are not picked up by the scheduler.
 
 **View scheduled crons:**
 ```bash
@@ -546,7 +546,7 @@ Each skill is in `.claude/skills/<name>/SKILL.md`. When you encounter a scenario
 ## System Management
 
 Key paths:
-- Agent config: `orgs/{org}/agents/{agent}/config.json` — crons, model, session limits
+- Agent config: `orgs/{org}/agents/{agent}/config.json` — initial cron config (migration source), model, session limits
 - Agent secrets: `orgs/{org}/agents/{agent}/.env` — BOT_TOKEN, CHAT_ID, ALLOWED_USER
 - Org secrets: `orgs/{org}/secrets.env` — shared API keys (GEMINI_API_KEY, OPENAI_API_KEY, etc.)
 - Logs: `~/.cortextos/$CTX_INSTANCE_ID/logs/$CTX_AGENT_NAME/` — activity, fast-checker, stdout, stderr
