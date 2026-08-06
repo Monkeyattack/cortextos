@@ -17,7 +17,51 @@ If this fails, your agent shows as DEAD on the dashboard. Fix it before anything
 
 Both are required every cycle. Skipping Step 1 leaves your dashboard view stale even though you're firing events.
 
-## Step 2: Sweep inbox for un-ACK'd messages
+## Step 2: Telegram channel health probe
+
+```bash
+# Locate this agent's .env — skip silently if absent or placeholder token
+AGENT_ENV=$(find /home/claude-dev/cortextos/orgs -name ".env" -path "*/${CTX_AGENT_NAME}/.env" 2>/dev/null | head -1)
+if [[ -z "$AGENT_ENV" ]] || ! grep -q '^BOT_TOKEN=' "$AGENT_ENV" 2>/dev/null; then
+  echo "[heartbeat] Telegram probe: no .env or BOT_TOKEN — skipping"
+else
+  # shellcheck source=/dev/null
+  source "$AGENT_ENV"
+  if printf '%s' "${BOT_TOKEN:-}" | grep -qE 'NEEDS_NEW|PLACEHOLDER|CHANGEME|\{\{'; then
+    echo "[heartbeat] Telegram probe: placeholder token — skipping"
+  else
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+      "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>/dev/null || echo "000")
+    if [[ "$HTTP_CODE" != "200" ]]; then
+      cortextos bus log-event heartbeat telegram_channel_down error \
+        --meta "{\"http_code\":\"${HTTP_CODE}\",\"agent\":\"${CTX_AGENT_NAME}\"}" 2>/dev/null || true
+      echo "[heartbeat] FAIL: Telegram channel down (HTTP ${HTTP_CODE}) — logged"
+    else
+      echo "[heartbeat] Telegram probe: OK (HTTP 200)"
+    fi
+    # Token collision check — alarm if BOT_TOKEN is shared by another agent (e.g. copy-paste misconfiguration)
+    MY_MD5=$(printf '%s' "$BOT_TOKEN" | md5sum | cut -d' ' -f1)
+    COLLIDES=""
+    while IFS= read -r other_env; do
+      other_token=$(grep -oP '(?<=^BOT_TOKEN=)\S+' "$other_env" 2>/dev/null || true)
+      [[ -z "$other_token" ]] && continue
+      other_md5=$(printf '%s' "$other_token" | md5sum | cut -d' ' -f1)
+      if [[ "$other_md5" == "$MY_MD5" ]]; then
+        other_agent=$(basename "$(dirname "$other_env")")
+        COLLIDES="${COLLIDES}${other_agent},"
+      fi
+    done < <(find /home/claude-dev/cortextos/orgs -name ".env" \
+      -not -path "*/${CTX_AGENT_NAME}/.env" 2>/dev/null)
+    if [[ -n "$COLLIDES" ]]; then
+      cortextos bus log-event heartbeat telegram_token_collision error \
+        --meta "{\"agent\":\"${CTX_AGENT_NAME}\",\"collides_with\":\"${COLLIDES%,}\"}" 2>/dev/null || true
+      echo "[heartbeat] WARN: BOT_TOKEN collision with ${COLLIDES%,} — logged"
+    fi
+  fi
+fi
+```
+
+## Step 3: Sweep inbox for un-ACK'd messages
 
 Messages arrive in real time via the fast-checker daemon — you don't need to poll for them. This step is a safety sweep for anything that wasn't ACK'd (e.g. a crash mid-processing).
 
@@ -35,7 +79,7 @@ cortextos bus ack-inbox "<message_id>"
 
 Un-ACK'd messages are re-delivered after 5 minutes. Target: 0 un-ACK'd after this sweep.
 
-## Step 3: Check task queue + stale task detection
+## Step 4: Check task queue + stale task detection
 
 Full reference: `.claude/skills/tasks/SKILL.md`
 
@@ -50,7 +94,7 @@ cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 
 Stale tasks are visible on the dashboard. They make you look broken.
 
-## Step 4: Log heartbeat event
+## Step 5: Log heartbeat event
 
 Full reference: `.claude/skills/event-logging/SKILL.md`
 
@@ -58,7 +102,7 @@ Full reference: `.claude/skills/event-logging/SKILL.md`
 cortextos bus log-event heartbeat agent_heartbeat info --meta '{"agent":"'$CTX_AGENT_NAME'"}'
 ```
 
-## Step 5: Write daily memory
+## Step 6: Write daily memory
 
 Full reference: `.claude/skills/memory/SKILL.md`
 
@@ -77,7 +121,7 @@ cat >> "$MEMORY_DIR/$TODAY.md" << MEMORY
 MEMORY
 ```
 
-## Step 6: Check GOALS.md
+## Step 7: Check GOALS.md
 
 Read GOALS.md. Goals are refreshed daily by the orchestrator each morning.
 
@@ -85,7 +129,7 @@ Read GOALS.md. Goals are refreshed daily by the orchestrator each morning.
 - If goals are stale (>24h without update): message the orchestrator to request fresh goals
 - If you have no goals: message the orchestrator immediately. Don't idle.
 
-## Step 7: Resume work
+## Step 8: Resume work
 
 Full reference: `.claude/skills/tasks/SKILL.md`
 
@@ -104,7 +148,7 @@ cortextos bus complete-task "<task_id>" --result "<summary of what was produced>
 If you are blocked, see `.claude/skills/human-tasks/SKILL.md` for the human task and approval workflow.
 If you need an approval before acting, see `.claude/skills/approvals/SKILL.md`.
 
-## Step 8: Guardrail self-check
+## Step 9: Guardrail self-check
 
 Full reference: `.claude/skills/guardrails-reference/SKILL.md`
 
@@ -117,7 +161,7 @@ cortextos bus log-event action guardrail_triggered info --meta '{"guardrail":"<w
 
 If you discovered a new pattern that should be a guardrail, add it to GUARDRAILS.md now.
 
-## Step 9: Update long-term memory (if applicable)
+## Step 10: Update long-term memory (if applicable)
 
 Full reference: `.claude/skills/memory/SKILL.md`
 
@@ -127,7 +171,7 @@ If you learned something this cycle that should persist across sessions:
 - System behaviors noted
 - Append to MEMORY.md
 
-## Step 10: Re-ingest memory to knowledge base
+## Step 11: Re-ingest memory to knowledge base
 
 Full reference: `.claude/skills/knowledge-base/SKILL.md`
 
