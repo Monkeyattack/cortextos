@@ -104,11 +104,11 @@ export function nextFireFromCron(expr: string, fromMs: number): number {
 
   for (let i = 0; i < MAX_MINUTES; i++) {
     const d = new Date(candidate);
-    const m  = d.getMinutes();
-    const h  = d.getHours();
-    const dy = d.getDate();
-    const mo = d.getMonth() + 1; // 1-12
-    const dw = d.getDay();       // 0-6
+    const m  = d.getUTCMinutes();
+    const h  = d.getUTCHours();
+    const dy = d.getUTCDate();
+    const mo = d.getUTCMonth() + 1; // 1-12
+    const dw = d.getUTCDay();       // 0-6
 
     if (
       months.includes(mo) &&
