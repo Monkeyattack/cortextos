@@ -177,7 +177,7 @@ export const addAgentCommand = new Command('add-agent')
         agent_name: name,
         startup_delay: 0,
         max_session_seconds: 255600,
-        enabled: true,
+        enabled: false,
         crons: [],
       }, null, 2) + '\n', 'utf-8');
     }
@@ -196,9 +196,25 @@ export const addAgentCommand = new Command('add-agent')
       }
     }
 
-    // Create .env placeholder with helpful comments
+    // Enforce safe bootstrap defaults: new agents must start disabled with no
+    // active crons until onboarding completes. Templates may set enabled:true
+    // or pre-populate crons — override both unconditionally.
+    if (existsSync(configPath)) {
+      try {
+        const agentCfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+        agentCfg.enabled = false;
+        agentCfg.crons = [];
+        writeFileSync(configPath, JSON.stringify(agentCfg, null, 2) + '\n', 'utf-8');
+      } catch (err) {
+        console.error(`Warning: failed to enforce safe defaults in config.json: ${(err as Error).message}`);
+      }
+    }
+
+    // Create .env placeholder with helpful comments. Always overwrite —
+    // templates may have included a live BOT_TOKEN/CHAT_ID from the org
+    // context, which must never be inherited by a newly created agent.
     const envPath = join(agentDir, '.env');
-    if (!existsSync(envPath)) {
+    {
       writeFileSync(envPath, [
         `# Agent environment for ${name}`,
         '#',
@@ -332,13 +348,23 @@ export const addAgentCommand = new Command('add-agent')
 
     if (!enabledAgents[name]) {
       enabledAgents[name] = {
-        enabled: true,
+        enabled: false,
         status: 'configured',
         ...(org ? { org } : {}),
       };
       writeFileSync(enabledPath, JSON.stringify(enabledAgents, null, 2) + '\n', 'utf-8');
       console.log(`  Registered in enabled-agents.json`);
     }
+
+    // Write .onboarded marker so the agent skips the onboarding boot check.
+    // New agents are created with empty credentials (BOT_TOKEN/CHAT_ID) and
+    // enabled:false — they are pre-onboarded and safe to start once credentials
+    // are filled in, without triggering the interactive onboarding flow that
+    // fires when this marker is absent.
+    const stateDir = join(ctxRoot, 'state', name);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, '.onboarded'), '', 'utf-8');
+    console.log(`  Wrote .onboarded marker`);
 
     console.log(`\n  Agent "${name}" created.`);
     console.log(`\n  Next steps:`);
