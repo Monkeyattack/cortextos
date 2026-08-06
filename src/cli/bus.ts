@@ -2835,9 +2835,48 @@ busCommand
 
 // --- fix-agent-settings ---
 
+/**
+ * `cortextos bus hook-session-start` is not a registered bus subcommand — running
+ * it exits with "unknown command". Agent settings.json files created from the
+ * agent template carried a SessionStart stanza invoking it, so every boot spent
+ * the hook timeout on a command that could never run. Strip it wherever it is
+ * found; the stanza is dead weight, not a missing feature (the subcommand is
+ * deliberately NOT being implemented).
+ *
+ * Returns true if the settings object was modified.
+ */
+export function stripDeadSessionStartHook(settings: any): boolean {
+  const DEAD_COMMAND = 'cortextos bus hook-session-start';
+  const entries = settings?.hooks?.SessionStart;
+  if (!Array.isArray(entries)) return false;
+
+  let changed = false;
+  const kept = entries.filter((entry: any) => {
+    if (!Array.isArray(entry?.hooks)) return true;
+    const survivors = entry.hooks.filter((h: any) => h?.command !== DEAD_COMMAND);
+    if (survivors.length === entry.hooks.length) return true;
+    changed = true;
+    entry.hooks = survivors;
+    return survivors.length > 0;
+  });
+  if (!changed) return false;
+
+  if (kept.length > 0) {
+    settings.hooks.SessionStart = kept;
+  } else {
+    delete settings.hooks.SessionStart;
+  }
+  return true;
+}
+
+/** Non-mutating probe for the dead SessionStart stanza (used by --dry-run). */
+export function hasDeadSessionStartHook(settings: any): boolean {
+  return stripDeadSessionStartHook(JSON.parse(JSON.stringify(settings ?? {})));
+}
+
 busCommand
   .command('fix-agent-settings')
-  .description('Patch all agent settings.json files: add missing allowlist tools and statusLine hook')
+  .description('Patch all agent settings.json files: add missing allowlist tools and statusLine hook, remove dead SessionStart hook')
   .option('--dry-run', 'Show what would be changed without writing')
   .action((opts: { dryRun?: boolean }) => {
     const { existsSync: fsExists, readdirSync: fsReaddir, readFileSync: fsRead, writeFileSync: fsWrite } = require('fs');
@@ -2900,6 +2939,12 @@ busCommand
           changes.push(`statusLine.refreshInterval: ${settings.statusLine.refreshInterval}s → 30s (below minimum)`);
         }
 
+        // Dead SessionStart stanza: `cortextos bus hook-session-start` is not a
+        // registered subcommand, so the hook can only ever fail. Strip it.
+        if (hasDeadSessionStartHook(settings)) {
+          changes.push('hooks.SessionStart: remove dead hook-session-start');
+        }
+
         if (changes.length === 0) {
           console.log(`  OK   ${agent}: already up to date`);
           skipped++;
@@ -2920,6 +2965,7 @@ busCommand
           ) {
             settings.statusLine.refreshInterval = 30; // clamp only — preserve other fields
           }
+          stripDeadSessionStartHook(settings);
           fsWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
           console.log(`  FIX  ${agent}: applied [${changes.join('; ')}]`);
           patched++;
