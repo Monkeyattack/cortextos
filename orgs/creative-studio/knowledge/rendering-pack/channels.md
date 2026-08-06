@@ -44,3 +44,27 @@ Primary key: `id` (varchar 64). Note: `channel_id` is the FK column name on the 
 - **chris-meredith:** ElevenLabs voice `kyj06yo9f25k`
 - **ai-theist / wendy-recap:** HeyGen avatar `Abigail_expressive_2024112501`
 - **phantom-findings:** no canonical voice/avatar (visual-only)
+
+---
+
+## Phantom Findings — Content Policy (Chris audit 2026-08-01)
+
+### Titling Standard
+- **MUST lead with the specific named cryptid/legend** (e.g. "Hantu Tinggi", "Fresno Nightcrawlers", "Skinwalker") — NOT generic hooks like "The Creature That..."
+- Keyword check required before finalizing each title; search intent drives 47.5% of views
+- Pattern: `[Specific Entity Name]: [hook/context]`
+
+### Upload Volume
+- **8–10 Shorts per week** (concentrated schedule), down from 20.6/wk
+- Batch scheduling preferred; do not spread thin across every day
+
+### Teasers / Previews
+- **NO public teasers** — unlisted only
+- Generic teasers dilute channel identity and were confirmed sub-loss driver
+- Any preview link shared externally must be unlisted YouTube URL only
+
+### Pre-Render Checklist
+1. Title leads with specific named entity (not genre descriptor)
+2. Keyword lookup complete
+3. Upload slot confirmed within 8–10/wk budget
+4. No public teaser scheduled alongside this Short
