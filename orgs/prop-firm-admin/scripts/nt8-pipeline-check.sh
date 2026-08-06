@@ -62,6 +62,11 @@ STALE_ROWS=$(psql "$DB" -tA -F'|' -c "
          round(EXTRACT(EPOCH FROM (now() - s.last_seen)) / 3600, 1)
   FROM strategy_states s
   WHERE s.state NOT IN ('Archived', 'Finalized')
+    AND s.account_name NOT IN (
+      'PPNTETL25024895000005',
+      'PPNTETL25024895000006',
+      'PPNTETL25024895000007'
+    )
     AND s.last_seen < now() - interval '${STALE_THRESHOLD_HOURS} hours'
     AND s.last_seen > now() - interval '${DETACHED_AFTER_DAYS} days'
     AND EXISTS (

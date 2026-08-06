@@ -19,12 +19,28 @@ CHAT_ID="6585156851"
 PILOT_ACCOUNT="PAAPEX4333770000017"
 PILOT_STRATEGY="H137_BilateralBreakout"
 
+# Blown/retired accounts — permanently excluded from all alerts.
+# These accounts confirmed blown by Chris; their strategy_states rows are dead.
+BLOWN_ACCOUNTS=(
+  'PPNTETL25024895000005'  # blown, confirmed Chris 2026-08-05 morning brief
+  'PPNTETL25024895000006'  # blown, same terminal
+  'PPNTETL25024895000007'  # blown, same terminal
+)
+
 # Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
 # Each entry MUST carry a reason and a removal condition.
 SUPPRESSED_PAIRS=(
   'PPNTF100024895000002|MarketOpenFlip'  # tombstone-gap: detached strategy, pending Chris decision — remove when task_1784882768044 ships
   'APEX4333770000091|MarketOpenFlip'     # tombstone-gap: strategy removed from live state 2026-07-30, matches PPNTETL roster adjustment pattern — remove after Chris confirms in morning brief
 )
+
+is_blown() {
+  local acct="$1" b
+  for b in "${BLOWN_ACCOUNTS[@]}"; do
+    [ "$b" = "$acct" ] && return 0
+  done
+  return 1
+}
 
 is_suppressed() {
   local pair="$1" s
@@ -156,6 +172,11 @@ SUPPRESSED_COUNT=0
 NT8_GHOST_COUNT=0
 while IFS='|' read -r acct strat age_h; do
   [ -z "$acct" ] && continue
+  if is_blown "$acct"; then
+    echo "[premarket-check] BLOWN: ${strat} / ${acct}: excluded (confirmed blown 2026-08-05)"
+    SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
+    continue
+  fi
   if is_suppressed "${acct}|${strat}"; then
     echo "[premarket-check] SUPPRESSED: ${strat} / ${acct}: ${age_h}h stale (known false-positive)"
     SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
