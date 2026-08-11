@@ -6,6 +6,32 @@ import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI, formatValidateError } from '../telegram/api.js';
 
 /**
+ * Sentinel BOT_TOKEN value marking an agent as bus-only: a backend worker
+ * with no Telegram channel, communicating solely over the bus.
+ *
+ * The daemon already handles these — agent-manager rejects any BOT_TOKEN that
+ * is not `<numeric_id>:<secret>`, leaves Telegram unstarted, and boots the
+ * agent normally. `pmo` has run this way in production. This constant lets
+ * `cortextos enable` recognise the same declaration instead of hard-failing
+ * its Telegram preflight on an agent that legitimately has no bot.
+ */
+export const BUS_ONLY_TOKEN = 'bus-only';
+
+/**
+ * True when an agent's parsed .env declares it bus-only.
+ *
+ * Deliberately strict: only the exact `bus-only` sentinel counts. An absent or
+ * empty BOT_TOKEN does NOT make an agent bus-only, because that is also what a
+ * Telegram agent looks like when its token was lost, stripped by a dedup pass,
+ * or never filled in — and silently enabling that agent with a dead channel is
+ * precisely what the Telegram preflight exists to prevent. Bus-only must be a
+ * deliberate declaration, never an omission.
+ */
+export function isBusOnlyAgent(env: Record<string, string | undefined>): boolean {
+  return env.BOT_TOKEN?.trim() === BUS_ONLY_TOKEN;
+}
+
+/**
  * BUG-035 fix: discover the cortextOS framework root without depending on
  * `process.cwd()`. Order of precedence:
  *   1. CTX_FRAMEWORK_ROOT env var (explicit, set by ecosystem.config.js)
@@ -175,11 +201,34 @@ export const enableAgentCommand = new Command('enable')
     }
 
     const env = parseEnvFile(agentEnvPath);
-    const missing = (['BOT_TOKEN', 'CHAT_ID'] as const).filter(k => !env[k]);
-    if (missing.length > 0) {
-      console.error(`Error: .env for agent "${agent}" is missing required values: ${missing.join(', ')}`);
-      console.error(`Edit ${agentEnvPath} and set BOT_TOKEN and CHAT_ID before enabling.`);
-      process.exit(1);
+
+    // Bus-only agents: backend workers with no Telegram channel at all. They
+    // declare it by setting BOT_TOKEN to the literal sentinel `bus-only`
+    // (the convention pmo already runs on). The daemon has always supported
+    // these — agent-manager rejects a non-token BOT_TOKEN, leaves Telegram
+    // unstarted, and the agent boots and runs on the bus. Only this preflight
+    // stood in the way, so a legitimate backend agent could not be enabled.
+    //
+    // 2026-08-11: vectorbt-dev and backtest-runner sat unusable because of
+    // this. Both are pure backend workers that never needed a bot.
+    //
+    // The sentinel is required rather than accepting an absent BOT_TOKEN on
+    // purpose. "No token" is also what a Telegram agent looks like when its
+    // token was lost or stripped, and silently enabling that agent with its
+    // channel dead is the failure this preflight exists to prevent. Bus-only
+    // has to be a deliberate declaration, not an omission.
+    const isBusOnly = isBusOnlyAgent(env);
+
+    if (isBusOnly) {
+      console.log(`Bus-only agent: BOT_TOKEN=${BUS_ONLY_TOKEN}. Skipping Telegram validation — this agent has no Telegram channel and communicates over the bus.`);
+    } else {
+      const missing = (['BOT_TOKEN', 'CHAT_ID'] as const).filter(k => !env[k]);
+      if (missing.length > 0) {
+        console.error(`Error: .env for agent "${agent}" is missing required values: ${missing.join(', ')}`);
+        console.error(`Edit ${agentEnvPath} and set BOT_TOKEN and CHAT_ID before enabling.`);
+        console.error(`For a backend agent with no Telegram channel, set BOT_TOKEN=${BUS_ONLY_TOKEN} instead.`);
+        process.exit(1);
+      }
     }
 
     // self-chat trap preflight: validate BOT_TOKEN + CHAT_ID against the live
@@ -194,6 +243,9 @@ export const enableAgentCommand = new Command('enable')
     // bot_recipient, self_chat). Warns but does not block on transient
     // reasons (network_error, rate_limited) so offline enable and burst
     // enables during the morning cascade still succeed.
+    //
+    // Skipped entirely for bus-only agents — there is no bot to validate.
+    if (!isBusOnly) {
     try {
       const telegramApi = new TelegramAPI(env.BOT_TOKEN);
       const validation = await telegramApi.validateCredentials(env.CHAT_ID);
@@ -218,6 +270,7 @@ export const enableAgentCommand = new Command('enable')
       // the validator itself.
       console.error(`Warning: Telegram credential validation crashed: ${err instanceof Error ? err.message : String(err)}`);
       console.error('  Continuing enable. Investigate the validator if this recurs.');
+    }
     }
 
     const agents = readEnabledAgents(options.instance);
