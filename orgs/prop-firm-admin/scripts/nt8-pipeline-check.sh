@@ -65,7 +65,11 @@ STALE_ROWS=$(psql "$DB" -tA -F'|' -c "
     AND s.account_name NOT IN (
       'PPNTETL25024895000005',
       'PPNTETL25024895000006',
-      'PPNTETL25024895000007'
+      'PPNTETL25024895000007',
+      'PAAPEX4333770000002',
+      'TAKEPROFITPRO392542906',
+      'PPNTPPX50024895000001',
+      'TDFYG50201122518'
     )
     AND s.last_seen < now() - interval '${STALE_THRESHOLD_HOURS} hours'
     AND s.last_seen > now() - interval '${DETACHED_AFTER_DAYS} days'

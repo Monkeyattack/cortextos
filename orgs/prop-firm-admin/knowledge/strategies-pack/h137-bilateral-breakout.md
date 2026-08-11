@@ -1,7 +1,7 @@
 # H137 BilateralBreakout
 
 **Pack version:** 1.0.9 | **Status tier:** VALIDATED
-**Last updated:** 2026-08-04 | **Gate stamp:** fable-reviewer 2026-08-04 (see gate-stamps/stamps.jsonl)
+**Last updated:** 2026-08-10 | **Gate stamp:** fable-reviewer 2026-08-04 (see gate-stamps/stamps.jsonl)
 
 ---
 
@@ -25,7 +25,7 @@ These are two separate gates — getting this wrong causes incorrect monitoring.
 
 ## Exit logic
 
-Three exit types, in priority order:
+Four exit types, in priority order:
 1. **TP (take profit):** Unnamed in exit_signal — strategy exits when price reaches the profit target
 2. **SL (stop loss):** Unnamed in exit_signal — strategy exits when price hits the stop
 3. **EOD exit (H137_Long_EOD / H137_Short_EOD):** Fires on the bar closing after 3:45 PM ET. In practice this is the 3:45–3:50 PM ET bar, exit recorded at ~3:50 PM ET = ~2:50 PM CT. This is DESIGNED behavior — exits before close volatility. IsExitOnSessionCloseStrategy (~4:00 ET) is a backstop only.
@@ -69,9 +69,10 @@ Three exit types, in priority order:
 - **Aug-5 named-day override (Chris, 2026-08-05, decision_1785944377 button "COUNT - day 8"):** Aug 5 COUNTS as day 8 — pilot +$387.50 (Short 5ct, entry 9:55:01 CT signal H137_Short, exit 10:18:44 CT). Third consecutive all-manual exit day: brackets cancelled then generic Close filled, staggered closes across all 7 entered accounts, 10:16:01 CT through 12:08:12 CT (6 non-pilot legs +$3,681.25; day total +$4,068.75 incl. pilot). CORRECTED 18:58Z from "6 accounts / +$3,156.25": APEX...091's leg (+$912.50, exit 12:08 CT) had no trades row at first query — write-on-exit lag, the row landed when the position closed 90 min later. Exit-signal mechanism source-verified same day (374f375 emits only named exits; bare Close = external flatten by construction). Series: 8/30, 7W/1L, +$693.75. Same named-day-override class; no general precedent.
 - **Language-tier consequence (binding, per gate):** because conformance is not required, the 30-day series outcome validates **live profitability of the as-run config** — it must never be described as "backtest-validated." Pre-374f375 days ran a hybrid config no backtest covers; describe the series result as live-validated profitability only.
 - Target: 30 valid days
-- Record as of 2026-08-04 EOD: **6W / 1L (7/30)**
-- Pilot P&L as of 2026-08-04 EOD: **+$306.25** (DB-authoritative; stale figures retired: $413.75 PM carry-forward, $381.25 pre-Aug-4-ruling)
-- Days 9+10 excluded: all-manual exits by Chris (fleet made +$90 / +$1,500 under manual management, tracked separately)
+- Record as of 2026-08-06 EOD: **8W / 1L (9/30)** (DB-authoritative: SELECT COUNT(DISTINCT t.entry_time::date) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL — returned 9 as of 2026-08-10)
+- Pilot P&L as of 2026-08-06 EOD: **+$700.00** (day 9: Aug-6 Short +$6.25; stale: +$306.25 @Aug-4, +$693.75 @Aug-5)
+- **Aug-6 (day 9):** pilot Short +$6.25, no named exit (manual). h137_trade_exclusions does NOT exclude Aug-6 — counts per DB. Prior pack note "Days 9+10 excluded" was stale/prospective; Aug-6 is valid. Same named-day-override class as Jul-24/Aug-3/Aug-4/Aug-5 pending explicit Chris ruling (not yet received; DB is authoritative in absence of exclusion).
+- No trades Aug 7–10 on pilot (Aug 7=Thu, Aug 8=Fri skip, Aug 9=Sat, Aug 10=Sun). Next window: Mon Aug 11.
 
 **Payout thresholds (minimum win filters do NOT apply — these are payout minimums):**
 - MFF: $150 minimum per payout

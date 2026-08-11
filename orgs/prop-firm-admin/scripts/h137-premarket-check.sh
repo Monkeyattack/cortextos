@@ -25,6 +25,10 @@ BLOWN_ACCOUNTS=(
   'PPNTETL25024895000005'  # blown, confirmed Chris 2026-08-05 morning brief
   'PPNTETL25024895000006'  # blown, same terminal
   'PPNTETL25024895000007'  # blown, same terminal
+  'PAAPEX4333770000002'    # PA02, payout-pull exit confirmed Chris 2026-08-05; PA01 replacing
+  'TAKEPROFITPRO392542906' # dead account, chief confirmed 2026-08-06
+  'PPNTPPX50024895000001'  # dead account, chief confirmed 2026-08-06
+  'TDFYG50201122518'       # blown, Chris confirmed "Nope. Blown" 2026-08-06 morning brief via fable-reviewer
 )
 
 # Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
@@ -208,7 +212,7 @@ if [ "$STALE_COUNT" -eq 0 ]; then
 fi
 
 MSG="PRE-MARKET RED (${CT_TIME}): ${STALE_COUNT} ACTIVE strategies stale >2h (NT8 offline or DLL failure):
-${STALE_LIST}Verify NT8 terminals (HolyGrail/Vincere) before H137 window opens 9:30 ET.${ZOMBIE_NOTE}"
+${STALE_LIST}Verify NT8 terminals (HolyGrail/Vincere) before market open.${ZOMBIE_NOTE}"
 
 echo "[premarket-check] RED: ${STALE_COUNT} stale strategies${ZOMBIE_NOTE}"
 echo "$STALE_LIST"
