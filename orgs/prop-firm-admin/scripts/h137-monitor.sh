@@ -2,7 +2,14 @@
 # h137-monitor.sh — H137 EOD monitoring script
 # Fires at 21:30 UTC (4:30 PM CT) post-close, Mon-Fri.
 # Checks: strategy attachment, today's trade count, tripwire logic.
-# Output: OK / TRIPWIRE YELLOW / TRIPWIRE RED
+# Output: OK / TRIPWIRE NOTICE (≥H137_DROUGHT_THRESHOLD consecutive zero sessions, default 2)
+#
+# ESCALATION POLICY (chief ruling 2026-08-12):
+#   Monitor fires NOTICE at ≥2 consecutive eligible zeros (H137_DROUGHT_THRESHOLD).
+#   Chief reads the NOTICE and holds until 5+ consecutive zeros, then surfaces to Chris.
+#   Base rate: 31% of eligible sessions (Mon-Thu) are zero-trade; 5 consecutive ≈ 0.28%.
+#   Auto-send to Chris is NOT wired — this gate is chief-decides, not code-decides.
+#   Documented in strategies-pack/h137-bilateral-breakout.md.
 DRYRUN="${DRYRUN:-0}"
 
 DB="postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard"
@@ -43,16 +50,39 @@ SERIES_COUNT=$(psql_q "
 
 SERIES_COUNT="${SERIES_COUNT:-0}"
 
-# Open positions — use trades table (exit_time IS NULL) not positions table.
-# Positions table can carry stale qty rows after exit; trades exit_time is authoritative.
-OPEN_QTY=$(psql_q "
-  SELECT COUNT(*) FROM trades
-  WHERE account_name='${PILOT_ACCOUNT}'
-    AND strategy_name='${PILOT_STRATEGY}'
-    AND entry_time >= NOW()::date
-    AND exit_time IS NULL;")
+# Open positions — delegated to h137-open-position-check.sh (fable-reviewer PASS
+# at md5 61091e69e9ec5d8b5c4354429b9f8bc4, 2026-08-12).
+#
+# WHAT WAS HERE BEFORE, and why it had to go: this counted
+#   trades WHERE ... AND exit_time IS NULL
+# Measured 2026-08-12 across the whole table: 763 trades, 763 with a NON-NULL
+# exit_time, ZERO null. That predicate can never be true, so the count was
+# structurally always 0 and this monitor reported "Flat" unconditionally for its
+# entire life. It never once measured flatness. Doubly impossible, because a
+# trades row is only written ON EXIT — an open position has no row to test.
+# The comment above it claimed "trades exit_time is authoritative"; it was the
+# exact opposite, on a live-capital gate.
+#
+# The replacement is executions-primary, positions-advisory, with a dual-source
+# validated anchor, and it REFUSES rather than guessing when it cannot establish
+# a corroborated flat.
+#
+# EXIT CODE MAPPING (fable-reviewer standing condition): only 0 is quiet.
+#   0 FLAT          -> OPEN_QTY=0, no tripwire
+#   2 OPEN          -> alert, real open position
+#   3 DISAGREE      -> alert, sources conflict, state UNKNOWN, never treat as flat
+#   1 UNMEASURABLE  -> alert, no corroborated flat exists; needs OPEN_CHECK_EPOCH
+#                      with broker evidence before this monitor can cover it
+OPEN_CHECK="$(dirname "${BASH_SOURCE[0]}")/h137-open-position-check.sh"
+OPEN_CHECK_OUT=$(bash "$OPEN_CHECK" "${PILOT_ACCOUNT}" 2>&1)
+OPEN_CHECK_RC=$?
 
-OPEN_QTY="${OPEN_QTY:-0}"
+case "$OPEN_CHECK_RC" in
+  0) OPEN_QTY=0; OPEN_STATE="FLAT" ;;
+  2) OPEN_QTY=1; OPEN_STATE="OPEN" ;;
+  3) OPEN_QTY=1; OPEN_STATE="DISAGREE" ;;
+  *) OPEN_QTY=1; OPEN_STATE="UNMEASURABLE" ;;
+esac
 
 # PnL today (closed trades)
 PNL_TODAY=$(psql_q "
@@ -67,6 +97,23 @@ PNL_TODAY="${PNL_TODAY:-0}"
 # --- Tripwire logic ---
 
 # RED: strategy detached (stale >2h or absent)
+#
+# SCOPE WARNING — THIS EXIT PRE-EMPTS THE OPEN-POSITION CHECK.
+# Documented 2026-08-12 at fable-reviewer's instruction; deliberately NOT
+# reordered, because changing alert precedence on a live-capital gate is a gated
+# change, not a wire-in detail.
+#
+# This monitor is valid ONLY for accounts running H137. Pointing it at an
+# account with no H137 strategy_states row makes STRAT_AGE empty, this branch
+# fires DETACHED, and the script exits BEFORE the open-position check below —
+# so a genuinely open position on such an account is silently never evaluated.
+# Verified 2026-08-12: pointed at Sim3 (which is OPEN, net -1 MNQ) this exits
+# here with "DETACHED" and never reaches the open-position tripwire.
+#
+# On the H137 pilot this is harmless and arguably correct — a detached strategy
+# is the louder problem and it still alerts. The hazard is only if this monitor
+# is ever pointed at non-H137 accounts. If that happens, reordering becomes a
+# gated change at that time.
 if [ -z "$STRAT_AGE" ] || [ "${STRAT_AGE:-0}" -gt 120 ]; then
   echo "TRIPWIRE RED (${CT_TIME}): H137_BilateralBreakout on ${PILOT_ACCOUNT} DETACHED (age=${STRAT_AGE:-absent} min). NT8 may be offline."
   exit 0
@@ -74,7 +121,8 @@ fi
 
 # YELLOW: open position at EOD (should be flat)
 if [ "${OPEN_QTY}" -gt 0 ]; then
-  echo "TRIPWIRE YELLOW (${CT_TIME}): Open position at EOD — ${OPEN_QTY} contracts still open on ${PILOT_ACCOUNT}. Verify flat before tomorrow."
+  echo "TRIPWIRE YELLOW (${CT_TIME}): ${OPEN_STATE} at EOD on ${PILOT_ACCOUNT}. Verify flat before tomorrow."
+  echo "${OPEN_CHECK_OUT}"
   exit 0
 fi
 
