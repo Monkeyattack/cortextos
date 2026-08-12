@@ -55,7 +55,7 @@ for t in ts: print(t['status'], t.get('due_date','no-due'), t['id'], t['title'][
 
 - **Overdue or due today** outranks everything else. Work it or flag it — never let it pass silently.
 - **in_progress older than 2 hours** with no commit or artifact behind it: close it or say why it stalled.
-- **No PM tasks at all**: check GOALS.md, then message the orchestrator. Do not invent work.
+- **No PM tasks at all**: check `goals.json` (not GOALS.md — rendered copy, can be stale), then message the orchestrator. Do not invent work.
 
 Stale tasks are visible on the dashboard. They make you look broken.
 
@@ -110,9 +110,14 @@ cat >> "$MEMORY_DIR/$TODAY.md" << MEMORY
 MEMORY
 ```
 
-## Step 6: Check GOALS.md
+## Step 6: Check goals.json
 
-Read GOALS.md. Goals are refreshed daily by the orchestrator each morning.
+Read `goals.json` — that is the SOURCE. **Do not read GOALS.md.** GOALS.md is a rendered
+display copy: when `goals.json` is updated without regenerating it, GOALS.md keeps showing the
+OLD goals under an OLD `updated_at`, so it looks current while feeding you superseded work.
+That happened twice in 24h (2026-08-11, 2026-08-12) and was caught only by luck.
+`goals.json` carries `focus`, `goals[]`, `bottleneck`, `updated_at` and `updated_by`.
+Goals are refreshed daily by the orchestrator each morning.
 
 - If goals were updated today: you should already have tasks. If not, create them now — see `.claude/skills/tasks/SKILL.md`
 - If goals are stale (>24h without update): message the orchestrator to request fresh goals
@@ -225,3 +230,56 @@ This runs automatically on every heartbeat cycle. It ensures past experiences, u
 REMINDER: A heartbeat with 0 events logged and 0 memory updates means you did nothing visible.
 Target: >= 2 events and >= 1 memory update per heartbeat cycle.
 Invisible work is wasted work.
+
+## Telegram channel health probe — run every heartbeat cycle
+
+Added 2026-08-12. The live agents already carry this check; the templates did not, so every
+NEW agent was born unable to notice its own Telegram channel was dead. That is the exact
+failure that motivated it: braindump's channel had a placeholder BOT_TOKEN and three full
+heartbeat cycles passed with nobody detecting it, because there was no check to skip.
+
+Run this every cycle. It is fail-quiet by design — a missing .env or a placeholder token
+skips silently, so agents with no Telegram channel are not spammed. Only a real token that
+fails to authenticate logs an error.
+
+```bash
+# Locate this agent's .env — skip silently if absent or placeholder token
+AGENT_ENV=$(find /home/claude-dev/cortextos/orgs -name ".env" -path "*/${CTX_AGENT_NAME}/.env" 2>/dev/null | head -1)
+if [[ -z "$AGENT_ENV" ]] || ! grep -q '^BOT_TOKEN=' "$AGENT_ENV" 2>/dev/null; then
+  echo "[heartbeat] Telegram probe: no .env or BOT_TOKEN — skipping"
+else
+  # shellcheck source=/dev/null
+  source "$AGENT_ENV"
+  if printf '%s' "${BOT_TOKEN:-}" | grep -qE 'NEEDS_NEW|PLACEHOLDER|CHANGEME|\{\{'; then
+    echo "[heartbeat] Telegram probe: placeholder token — skipping"
+  else
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+      "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>/dev/null || echo "000")
+    if [[ "$HTTP_CODE" != "200" ]]; then
+      cortextos bus log-event heartbeat telegram_channel_down error \
+        --meta "{\"http_code\":\"${HTTP_CODE}\",\"agent\":\"${CTX_AGENT_NAME}\"}" 2>/dev/null || true
+      echo "[heartbeat] FAIL: Telegram channel down (HTTP ${HTTP_CODE}) — logged"
+    else
+      echo "[heartbeat] Telegram probe: OK (HTTP 200)"
+    fi
+    # Token collision check — alarm if BOT_TOKEN is shared by another agent (e.g. copy-paste misconfiguration)
+    MY_MD5=$(printf '%s' "$BOT_TOKEN" | md5sum | cut -d' ' -f1)
+    COLLIDES=""
+    while IFS= read -r other_env; do
+      other_token=$(grep -oP '(?<=^BOT_TOKEN=)\S+' "$other_env" 2>/dev/null || true)
+      [[ -z "$other_token" ]] && continue
+      other_md5=$(printf '%s' "$other_token" | md5sum | cut -d' ' -f1)
+      if [[ "$other_md5" == "$MY_MD5" ]]; then
+        other_agent=$(basename "$(dirname "$other_env")")
+        COLLIDES="${COLLIDES}${other_agent},"
+      fi
+    done < <(find /home/claude-dev/cortextos/orgs -name ".env" \
+      -not -path "*/${CTX_AGENT_NAME}/.env" 2>/dev/null)
+    if [[ -n "$COLLIDES" ]]; then
+      cortextos bus log-event heartbeat telegram_token_collision error \
+        --meta "{\"agent\":\"${CTX_AGENT_NAME}\",\"collides_with\":\"${COLLIDES%,}\"}" 2>/dev/null || true
+      echo "[heartbeat] WARN: BOT_TOKEN collision with ${COLLIDES%,} — logged"
+    fi
+  fi
+fi
+```
