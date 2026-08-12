@@ -14,8 +14,23 @@ set -u
 DB="postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard"
 CT_TIME=$(TZ=America/Chicago date '+%I:%M %p CT')
 CT_HOUR=$(( 10#$(TZ=America/Chicago date '+%H') ))
-BOT_TOKEN="8649138124:AAE2C5QfE2mSCgtHDo_ggveXKfmUvdA1hdo"
-CHAT_ID="6585156851"
+# Credentials come from the devops agent .env, never from this file. They were
+# hardcoded here in plaintext until 2026-08-12; the token in git history and in
+# any copy of this script older than that date must be treated as exposed.
+# Fail-closed: if the token cannot be read, the script exits rather than running
+# a live-capital health check whose alerts silently go nowhere.
+DEVOPS_ENV_FILE="${DEVOPS_ENV_FILE:-/home/claude-dev/cortextos/orgs/prop-firm-admin/agents/devops/.env}"
+read_env_value() {
+  local key="$1" file="$2"
+  [[ -r "$file" ]] || return 1
+  sed -n "s/^${key}=//p" "$file" | head -n 1 | tr -d '\042\047'
+}
+BOT_TOKEN="${BOT_TOKEN:-$(read_env_value BOT_TOKEN "$DEVOPS_ENV_FILE" || true)}"
+CHAT_ID="${CHAT_ID:-$(read_env_value CHAT_ID "$DEVOPS_ENV_FILE" || true)}"
+if [[ -z "${BOT_TOKEN:-}" || -z "${CHAT_ID:-}" ]]; then
+  echo "[premarket-check] FATAL: BOT_TOKEN/CHAT_ID not readable from ${DEVOPS_ENV_FILE} — refusing to run a health check that cannot alert" >&2
+  exit 1
+fi
 PILOT_ACCOUNT="PAAPEX4333770000017"
 PILOT_STRATEGY="H137_BilateralBreakout"
 

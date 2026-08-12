@@ -18,8 +18,21 @@
 set -euo pipefail
 
 DB="postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard"
-BOT_TOKEN="8649138124:AAE2C5QfE2mSCgtHDo_ggveXKfmUvdA1hdo"
-CHAT_ID="6585156851"
+# Credentials come from the devops agent .env, never from this file. They were
+# hardcoded here in plaintext until 2026-08-12; treat the old token as exposed.
+# Fail-closed: no token means no alerting, so the check must not run at all.
+DEVOPS_ENV_FILE="${DEVOPS_ENV_FILE:-/home/claude-dev/cortextos/orgs/prop-firm-admin/agents/devops/.env}"
+read_env_value() {
+  local key="$1" file="$2"
+  [[ -r "$file" ]] || return 1
+  sed -n "s/^${key}=//p" "$file" | head -n 1 | tr -d '\042\047'
+}
+BOT_TOKEN="${BOT_TOKEN:-$(read_env_value BOT_TOKEN "$DEVOPS_ENV_FILE" || true)}"
+CHAT_ID="${CHAT_ID:-$(read_env_value CHAT_ID "$DEVOPS_ENV_FILE" || true)}"
+if [[ -z "${BOT_TOKEN:-}" || -z "${CHAT_ID:-}" ]]; then
+  echo "[nt8-pipeline-check] FATAL: BOT_TOKEN/CHAT_ID not readable from ${DEVOPS_ENV_FILE} — refusing to run a check that cannot alert" >&2
+  exit 1
+fi
 STALE_THRESHOLD_HOURS=2
 DETACHED_AFTER_DAYS=7
 
