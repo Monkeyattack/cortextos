@@ -95,12 +95,30 @@ Four exit types, in priority order:
 
 - Flag any trade immediately to chief (day 4+ = progressing toward payout)
 - Pilot flat = series progressing normally; check exit_signal to distinguish TP vs EOD vs manual
-- ~~Check exit_time IS NULL to detect open positions~~ **REFUTED 2026-08-04** — an open position has NO trades row at all (see Write Semantics below). Open positions: `query-trades.sh open` (positions table w/ liveness filter) or `query-trades.sh entries` (orders table, what FIRED today).
+- ~~Check exit_time IS NULL to detect open positions~~ **REFUTED 2026-08-04** — an open position has NO trades row at all (see Write Semantics below). Re-measured 2026-08-12: 763 trades, 763 with a non-null `exit_time`, zero null, so that predicate can never fire. Open positions:
+  ```bash
+  # Net signed quantity from executions — a genuine flat nets to zero.
+  # This is the authority; positions can carry stale non-zero rows.
+  psql "postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard" -c "
+    SELECT account_name, instrument,
+           SUM(CASE WHEN direction='Long' THEN qty WHEN direction='Short' THEN -qty ELSE 0 END) AS net_qty
+    FROM executions WHERE account_name = 'PAAPEX4333770000017'
+    GROUP BY 1,2 HAVING SUM(CASE WHEN direction='Long' THEN qty WHEN direction='Short' THEN -qty ELSE 0 END) <> 0;"
+  ```
+  What FIRED today (orders — attribute from the CREATE event only, `strategy_name` mutates on later lifecycle events):
+  ```bash
+  psql "postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard" -c "
+    SELECT created_at, account_name, strategy_name, count(*)
+    FROM orders WHERE created_at >= CURRENT_DATE GROUP BY 1,2,3 ORDER BY 1;"
+  ```
+  `orgs/prop-firm-admin/scripts/h137-open-position-check.sh` wraps the netting query with a positions cross-check and reports source DISAGREEMENT rather than silently picking one — exit 0 flat, 2 open, 3 disagree, 1 unmeasurable. **It is pending fable-reviewer gate and not yet wired into `h137-monitor.sh`; check the gate has closed before relying on it.**
 - TAKEPROFITPRO: monitor via trades DB only; state feed not available from Vincere
 - Weekends: strategy monitors normally (signal window fires Mon-Fri only)
 ## Write Semantics — READ BEFORE QUERYING ANY TABLE (added v1.0.9)
 
-Three write-semantics failures burned the fleet in one week — each by someone who knew the tables well. The semantics live here and in the tool comment blocks (`scripts/query-trades.sh`), not in anyone's memory. **Before writing a query, state to yourself WHEN the row you are reading gets written.**
+Three write-semantics failures burned the fleet in one week — each by someone who knew the tables well. **Before writing a query, state to yourself WHEN the row you are reading gets written.**
+
+The semantics live here and, in fuller form, in [`knowledge/nt8-postgres-write-semantics.md`](../nt8-postgres-write-semantics.md) — which is queryable in `shared-prop-firm-admin`. They used to also live in the comment blocks of `scripts/query-trades.sh`; **that script was deleted 2026-08-12** (chief GO) after its documentation was extracted to that doc, so any instruction anywhere to run `query-trades.sh` is stale. It is archived at `orgs/prop-firm-admin/archives/retired-scripts-20260812.tar.gz` if you need the original.
 
 | Table/surface | Write semantics | Trap it causes | Correct read |
 |---|---|---|---|
@@ -112,3 +130,5 @@ Three write-semantics failures burned the fleet in one week — each by someone 
 All three writer defects share one NT8→Postgres write path; common-root-cause trace is open (lead flagged, not asserted).
 
 - **h137-monitor.sh evening false-zeros (v1.0.8):** the nightly monitor used a `NOW()::date` UTC window with CT labels — after ~7:00 PM CT it reports ZERO trades for the CT day even when trades exist. Nightly reports from 2026-07-2x through 08-03 in that window are unreliable; the trades DB is the only authority for daily counts. Devops fix tracked as task_1785810790946_cf9y16 — until it lands, never trust the monitor after 7 PM CT.
+
+- **Consecutive zero-trade session escalation threshold (chief ruling 2026-08-12):** `h137-monitor.sh` fires TRIPWIRE NOTICE at ≥2 consecutive eligible zero-trade sessions (Mon-Thu; Fri excluded by config). Chief reads the NOTICE and decides. Chief escalates to Chris at **5+ consecutive eligible zero-trade sessions** — base rate is 31% (5/16 eligible sessions historically were zero-trade), so 5 consecutive ≈ 0.28% probability. Below 5: chief holds. At 5+: surface to Chris with base-rate context. Auto-send is NOT wired; the gate is chief-decides, not code-decides.
