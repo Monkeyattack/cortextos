@@ -84,6 +84,27 @@ busCommand
       console.error(`Invalid priority '${priority}'. Must be one of: ${validPriorities.join(', ')}`);
       process.exit(1);
     }
+
+    // An empty body is NEVER intentional — it is always an upstream scripting
+    // error, and the sender walks away believing they communicated.
+    //
+    // Observed 2026-08-12 (braindump -> chief, msg 1786512611376-braindump-m9ok6,
+    // text length 0): a heredoc and the send were in one command block, the block
+    // hit a timeout before the heredoc ran, so `MSG=$(cat missing-file)` produced
+    // an empty string. The send then returned exit 0 and a real message id.
+    // Everything looked like success except the content.
+    //
+    // Fail closed. This is the same class as create-task accepting a null
+    // assignee: the dangerous state is the one that looks like success.
+    if (text.trim().length === 0) {
+      console.error(
+        'Refusing to send an empty message body.\n' +
+        '  An empty body is always an upstream error — a variable that did not expand, a heredoc\n' +
+        '  that never ran, or a command substitution over a missing file. Nothing was sent.\n' +
+        '  If you meant to send whitespace, you did not.',
+      );
+      process.exit(1);
+    }
     // Security (H9): Validate agent name before any filesystem access.
     try {
       validateAgentName(to);
@@ -158,6 +179,15 @@ busCommand
   .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
     if (!opts.assignee || !opts.assignee.trim()) {
       console.error('Error: --assignee <agent> is required. Tasks without an assignee are invisible to PM and queues.');
+      process.exit(1);
+    }
+    // An untitled task is worse than a missing one. Every retrieval path we have
+    // is title- or keyword-based, so the row becomes UNFINDABLE by the person who
+    // filed it — while still existing and still counting toward queue length.
+    // That corrupts the denominator of every sweep and stall-count that reads the
+    // queue. Same fail-closed reasoning as the --assignee guard above.
+    if (!title || title.trim().length === 0) {
+      console.error('Error: task title cannot be empty. An untitled task is unfindable by every retrieval path, yet still counts toward queue length.');
       process.exit(1);
     }
     const env = resolveEnv();
@@ -412,6 +442,13 @@ busCommand
     const validSeverities: EventSeverity[] = ['info', 'warning', 'error', 'critical'];
     if (!validSeverities.includes(severity as EventSeverity)) {
       console.error(`Invalid severity '${severity}'. Must be one of: ${validSeverities.join(', ')}`);
+      process.exit(1);
+    }
+    // Least harmful of the four — an unnamed row in a feed rather than a false
+    // record — but the same fail-closed rule: a write that looks like success
+    // and carries no content is always an upstream scripting error.
+    if (!event || event.trim().length === 0) {
+      console.error('Error: event name cannot be empty. An unnamed event is an unsearchable row in the feed.');
       process.exit(1);
     }
     const env = resolveEnv();
@@ -692,6 +729,14 @@ busCommand
   .description('Post a message to the org Telegram activity channel')
   .argument('<message>', 'Message to post')
   .action(async (message: string) => {
+    // An empty broadcast is not a harmless no-op. postActivity now records the
+    // returned message_id to the activity ledger, so sending nothing MINTS
+    // DURABLE EVIDENCE of a communication that never happened — strictly worse
+    // than staying silent, because the ledger is what a later reader trusts.
+    if (!message || message.trim().length === 0) {
+      console.error('Error: refusing to post an empty activity message. It would write a ledger entry evidencing a broadcast that said nothing.');
+      process.exit(1);
+    }
     const env = resolveEnv();
     const orgDir = env.agentDir ? env.agentDir.replace(/\/agents\/.*$/, '') : '';
     const success = await postActivity(orgDir, env.ctxRoot, env.org, message);
@@ -1257,11 +1302,34 @@ busCommand
     }
 
     if (result.results.length === 0) {
+      // A degraded probe and an empty collection both produce zero rows. Only
+      // one of them licenses the sentence "there is nothing there", so they
+      // must never print the same line.
+      if (result.degraded) {
+        console.log(
+          `QUERY DEGRADED for: "${question}" — ${result.degradedReason}\n` +
+          `This is NOT an empty result. The KB could not be searched, so nothing ` +
+          `about the presence or absence of a document follows from it. Retry before concluding.`,
+        );
+        return;
+      }
       console.log(`No results found for: "${question}"`);
       return;
     }
 
-    console.log(`\n  Knowledge Base Results (${result.results.length}/${result.total})\n`);
+    console.log(`\n  Knowledge Base Results (${result.results.length}/${result.total})`);
+    // Say what the total is made of. A collection that contributed nothing is
+    // the interesting case and the one a bare total hides.
+    if (result.perCollection && result.perCollection.length > 1) {
+      const parts = result.perCollection
+        .map((c) => `${c.collection}: ${c.count}${c.count === 0 ? ' (nothing)' : ''}`)
+        .join('  |  ');
+      console.log(`  from — ${parts}`);
+    }
+    if (result.degraded) {
+      console.log(`  WARNING: partial — ${result.degradedReason}. Results below are incomplete.`);
+    }
+    console.log('');
     for (let i = 0; i < result.results.length; i++) {
       const r = result.results[i];
       console.log(`  [${i + 1}] Score: ${r.score.toFixed(3)} | ${r.source_file}`);
