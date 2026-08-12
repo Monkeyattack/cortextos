@@ -48,9 +48,59 @@ Multiple accounts across Apex, MFF, Tradeify have run MOV variants at different 
 
 **Orb-status gate:** orb-status controls MOV variants only. Excalibur is NOT controlled by orb-status — separate mechanism.
 
+## MNQ VIX Regime — fable-reviewer Ruling 2026-08-11
+
+**Ruling: GO — tighten MNQ VIX pause threshold from ≥20 to ≥18.**
+
+**Evidence (IS-derived — backtest-candidate language tier, not validated):**
+
+H201 MNQ ORB VIX-tier segmentation (IS 2025-09-01 → 2026-06-20, T=150 total):
+
+| VIX Tier | T | WR | Sharpe | Total P&L | Live Status |
+|---|---|---|---|---|---|
+| <15 (LongOnly engine) | 2 | 50.0% | -0.18 | -$35 | Active |
+| 15–18 | 83 | 49.4% | 1.18 | +$1,508 | Active — **sweet spot** |
+| 18–20 (decision bucket) | 29 | 34.5% | -0.72 | -$544 | Active → **proposed excluded** |
+| 20–22 (already excluded) | 13 | 46.2% | 0.50 | +$280 | Already paused (VIX≥20 rule) |
+| 22–25 (already excluded) | 14 | 14.3% | -3.05 | -$1,150 | Already paused |
+| ≥25 (ShortOnly engine) | 9 | 66.7% | 1.32 | +$536 | Already paused |
+
+**Impact of tightening (IS-derived):**
+- Current live universe (VIX<20): T=114, WR=45.6%, Sharpe=0.62
+- Proposed universe (VIX<18): T=85, WR=49.4%, Sharpe=1.14
+
+Decision bucket VIX 18-20 is the sole cost: T=29, Sharpe=-0.72. Removing it lifts Sharpe 0.62→1.14.
+
+**Note:** MNQ ORB VIX sensitivity is the **inverse** of VWAP strategies (H178, H184 gain edge at elevated VIX). Do not apply this ruling to other instruments.
+
+**30-session review:** Starting from devops deploy date (TBD — pending Chris morning brief visibility). After 30 live sessions under VIX<18 filter, re-derive WR/Sharpe from trade DB to confirm IS finding holds in live data.
+
+**Deploy action (pending devops):** Update MNQ VixMax in NT8 NinjaScript from 20 → 18, and update VIX pause threshold in `backtest/forward_test.py` to match.
+
+**Execution chain (post Chris morning brief approval):**
+1. Chris approves in morning brief
+2. devops updates VixMax=18 in NT8 NinjaScript for MNQ ORB
+3. Chris reads parameter back from NT8 terminal = immediate config confirmation
+4. Analyst queries `mov_sessions.vix_regime` on first VIX 18-20 session post-deploy (see query below) — expects regime flip from `Both` to pause/skip. If regime does NOT flip on a VIX 18-20 session, that is a failed deploy signal.
+
+**Step 4 verification query (run after first VIX 18-20 session post-deploy):**
+```sql
+SELECT session_date, account_name, session_vix, vix_regime, effective_direction
+FROM mov_sessions
+WHERE instrument = 'MNQ'
+  AND session_vix >= 18.0
+  AND session_vix < 20.0
+  AND session_date >= '<DEPLOY_DATE>'
+ORDER BY session_date DESC
+LIMIT 10;
+```
+Replace `<DEPLOY_DATE>` with the actual devops deploy date. Expected result: `vix_regime` column shows a pause/skip code (NOT `low` or `normal` + `Both`). If any row shows `effective_direction = 'Both'` at VIX 18-20, the deploy failed — escalate to devops immediately.
+
 ## Language tier
 
 LIVE-ACCUMULATING (partially active). MCL/MNQ variants effectively paused (OVX HARD-CAUTION). MES arm rebuilding. Do not call validated — all-time P&L is negative and instrument contamination complicates the history.
+
+MNQ VIX regime ruling (2026-08-11): IS-derived (backtest-candidate). Not validated until 30-session live review confirms.
 
 ## Monitoring notes
 

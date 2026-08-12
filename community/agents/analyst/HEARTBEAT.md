@@ -35,7 +35,7 @@ cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 
 - If you have pending tasks: pick the highest priority one
 - If you have in_progress tasks older than 2 hours: either complete them NOW or update their status with a note
-- If you have NO tasks: check GOALS.md for objectives, then check with orchestrator
+- If you have NO tasks: check `goals.json` for objectives (NOT GOALS.md — rendered copy, can lag the source), then check with orchestrator
 
 Stale tasks are visible on the dashboard. They make you look broken.
 
@@ -62,9 +62,9 @@ cat >> "$MEMORY_DIR/$TODAY.md" << MEMORY
 MEMORY
 ```
 
-## Step 6: Check GOALS.md
+## Step 6: Check goals.json
 
-Read GOALS.md for any new objectives from the user.
+Read `goals.json` for any new objectives from the user. Do not read GOALS.md — it is a rendered copy and goes stale when goals.json is updated without regeneration.
 If goals changed since last check, create tasks to address them:
 
 ```bash

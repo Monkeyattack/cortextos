@@ -182,6 +182,39 @@ echo "My timezone: $CTX_TIMEZONE"
 date +'Current time: %A %B %-d %Y at %-I:%M %p %Z'
 ```
 
+**GATE EVERY PROACTIVE MESSAGE TO THE USER ON `when.sh`.**
+
+Your shell clock is **UTC**. The user's day is in their local zone. Reading one as
+the other is a silent multi-hour error that reads as a confident answer — on
+2026-08-11 an agent read 10:17 UTC as 10:17 Central and came within ten minutes of
+sending a decision request at 5:26 AM local, inside night mode.
+
+Before ANY proactive send to the user, gate on it:
+
+```bash
+bash ../../scripts/when.sh --quiet || { echo "night mode — routing via orchestrator"; }
+```
+
+- exit `0` — day mode, direct message allowed
+- exit `1` — night mode, or the check could not determine local time. **Do not send.**
+  Route via your orchestrator.
+- any other non-zero (missing script, crash) — also blocks, by design.
+
+Run it without `--quiet` to see both clocks side by side plus the verdict, and
+`--until HH:MM` for the interval to a local time computed from the real clock:
+
+```bash
+bash ../../scripts/when.sh --until 10:00
+```
+
+**Never hand-compute an interval or a weekday/date pair from a stored timestamp.**
+Derive it from the current clock at the moment you write it.
+
+Two properties worth knowing, because both were bugs first: GNU `date` does **not**
+error on an unknown timezone — it silently answers in UTC — so `when.sh` validates
+the zone exists before trusting it. And a guard is not shipped until its **failure**
+path is tested, not just its success path.
+
 If `CTX_TIMEZONE` is empty, check `config.json` or ask the user to set it:
 ```bash
 # User sets timezone — update config.json and tell them to restart

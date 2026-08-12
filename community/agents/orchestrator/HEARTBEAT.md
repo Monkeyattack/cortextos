@@ -68,7 +68,7 @@ cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 
 - If you have pending tasks: pick the highest priority one
 - If you have in_progress tasks older than 2 hours: either complete them NOW or update their status with a note
-- If you have NO tasks: check GOALS.md for objectives, generate tasks for specialist agents
+- If you have NO tasks: check `goals.json` for objectives (NOT GOALS.md — rendered copy, can lag the source), generate tasks for specialist agents
 
 Stale tasks are visible on the dashboard. They make you look broken.
 
@@ -111,7 +111,9 @@ cat $CTX_FRAMEWORK_ROOT/orgs/$CTX_ORG/goals.json
 - If `north_star` is empty: message user via Telegram to set it
 - If any agent has an empty `goals.json` (focus and goals both empty): write their goals and regenerate GOALS.md
 
-Also read your own GOALS.md for any manual overrides or notes you left yourself.
+If you have notes or overrides to carry forward, write them to `memory/` — not to GOALS.md,
+which is regenerated and will lose them. GOALS.md is auto-generated from goals.json; anything
+hand-written into it is destroyed the next time `goals generate-md` runs.
 
 ## Step 7: Resume work
 

@@ -36,7 +36,9 @@ goalsCommand
       process.exit(1);
     }
 
-    const goals = Array.isArray(data.goals) ? (data.goals as Array<string | { title: string }>) : [];
+    const goals = Array.isArray(data.goals)
+      ? (data.goals as Array<string | { id?: string; title: string; status?: string; priority?: string }>)
+      : [];
     const focus = typeof data.focus === 'string' ? data.focus : '';
     const bottleneck = typeof data.bottleneck === 'string' ? data.bottleneck : '';
     const updatedAt = typeof data.updated_at === 'string' ? data.updated_at : new Date().toISOString();
@@ -57,9 +59,23 @@ goalsCommand
     if (goals.length === 0) {
       lines.push('(none set — message your orchestrator to request today\'s goals)');
     } else {
+      // Object-form goals carry id / status / priority alongside the title, and
+      // this renderer used to emit ONLY the title. A goal that had been closed
+      // therefore rendered identically to an active one — braindump's g3 read as
+      // indistinguishable from two live goals for as long as it was closed.
+      // Status leads the line so the difference is visible at a glance rather
+      // than requiring the reader to open goals.json to find out.
       goals.forEach((g, i) => {
-        const title = typeof g === 'string' ? g : (g as { title: string }).title;
-        lines.push(`${i + 1}. ${title}`);
+        if (typeof g === 'string') {
+          lines.push(`${i + 1}. ${g}`);
+          return;
+        }
+        const o = g as { id?: string; title: string; status?: string; priority?: string };
+        const id = o.id ? `[${o.id}] ` : '';
+        const status = o.status ? `**${o.status.toUpperCase()}** — ` : '';
+        // Label the priority: a bare `(1)` sits next to the list's own `1.` and reads as a duplicate.
+        const priority = o.priority ? ` _(p${o.priority})_` : '';
+        lines.push(`${i + 1}. ${id}${status}${o.title}${priority}`);
       });
     }
 

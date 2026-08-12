@@ -40,7 +40,7 @@ cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 
 - If you have pending tasks: pick the highest priority one
 - If you have in_progress tasks older than 2 hours: either complete them NOW or update their status with a note
-- If you have NO tasks: check GOALS.md for objectives, then message the orchestrator
+- If you have NO tasks: check `goals.json` for objectives (NOT GOALS.md — rendered copy, can lag the source), then message the orchestrator
 
 Stale tasks are visible on the dashboard. They make you look broken.
 
@@ -71,9 +71,14 @@ cat >> "$MEMORY_DIR/$TODAY.md" << MEMORY
 MEMORY
 ```
 
-## Step 6: Check GOALS.md
+## Step 6: Check goals.json
 
-Read GOALS.md. Goals are refreshed daily by the orchestrator each morning.
+Read `goals.json` — that is the SOURCE. **Do not read GOALS.md.** GOALS.md is a rendered
+display copy: when `goals.json` is updated without regenerating it, GOALS.md keeps showing the
+OLD goals under an OLD `updated_at`, so it looks current while feeding you superseded work.
+That happened twice in 24h (2026-08-11, 2026-08-12) and was caught only by luck.
+`goals.json` carries `focus`, `goals[]`, `bottleneck`, `updated_at` and `updated_by`.
+Goals are refreshed daily by the orchestrator each morning.
 
 - If goals were updated today: you should already have tasks. If not, create them now — see `.claude/skills/tasks/SKILL.md`
 - If goals are stale (>24h without update): message the orchestrator to request fresh goals
