@@ -1,6 +1,6 @@
 import { execSync, execFileSync } from 'child_process';
-import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync } from 'fs';
-import { join, extname } from 'path';
+import { existsSync, readFileSync, statSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join, extname, dirname } from 'path';
 import { readdirSync } from 'fs';
 import { ensureDir } from '../utils/atomic.js';
 import { TelegramAPI } from '../telegram/api.js';
@@ -438,9 +438,47 @@ export async function postActivity(
 
   try {
     const api = new TelegramAPI(botToken);
-    await api.sendMessage(chatId, message, replyMarkup);
+    const result = await api.sendMessage(chatId, message, replyMarkup);
+
+    // Record the dispatch so it is verifiable by someone other than the caller.
+    //
+    // 2026-08-11: a fleet-wide broadcast could not be verified by a peer agent
+    // afterwards. The reason was not that the id was unavailable — Telegram
+    // returns message_id and `sendMessage` hands it back — it was that this
+    // function DISCARDED the return value. The only trace was a line of stdout,
+    // which log rotation then removed. Evidence was destroyed twice: once here,
+    // once by rotation.
+    //
+    // "No outbound log" reads as a missing feature. Receiving the identifier and
+    // throwing it away is a defect. Best-effort: a ledger write must never turn
+    // a delivered message into a reported failure.
+    try {
+      const msgId = result?.result?.message_id ?? result?.message_id ?? null;
+      const ledger = join(ctxRoot, 'orgs', org, 'activity-posts.jsonl');
+      mkdirSync(dirname(ledger), { recursive: true });
+      appendFileSync(
+        ledger,
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          org,
+          chat_id: chatId,
+          message_id: msgId,
+          chars: message.length,
+          preview: message.slice(0, 120).replace(/\s+/g, ' '),
+        }) + '\n',
+      );
+    } catch {
+      // Ledger failure is not delivery failure. Swallow.
+    }
+
     return true;
-  } catch {
+  } catch (err) {
+    // Distinguish a rejected send from a missing config. Previously both
+    // surfaced as the same "check ACTIVITY_CHAT_ID" hint, which sent readers
+    // to a correctly-configured file while Telegram was the one refusing.
+    console.error(
+      `[post-activity] Telegram refused the message: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return false;
   }
 }
