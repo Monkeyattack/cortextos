@@ -221,8 +221,18 @@ if [[ -z "$AGENT_ENV" ]] || ! grep -q '^BOT_TOKEN=' "$AGENT_ENV" 2>/dev/null; th
 else
   # shellcheck source=/dev/null
   source "$AGENT_ENV"
-  if printf '%s' "${BOT_TOKEN:-}" | grep -qE 'NEEDS_NEW|PLACEHOLDER|CHANGEME|\{\{'; then
-    echo "[heartbeat] Telegram probe: placeholder token — skipping"
+  # POSITIVE gate: probe only what LOOKS like a real bot token (<digits>:<secret>).
+  # This was a denylist (NEEDS_NEW|PLACEHOLDER|CHANGEME|{{) and it failed open on
+  # every sentinel nobody had thought of. `bus-only` — the sentinel marking a
+  # backend agent with no Telegram bot at all — is on no denylist, so it fell
+  # through, got curl'd at getMe as a credential, and got md5'd by the collision
+  # check below. Two bus-only agents then "collide" with perfect confidence,
+  # because they DO share a string: the sentinel. md5("bus-only") = f651e7e6.
+  # `none` (2 agents) failed the same way. A denylist can only exclude the fakes
+  # someone already listed; a positive gate excludes every value that is not a
+  # token, including the ones invented tomorrow.
+  if ! printf '%s' "${BOT_TOKEN:-}" | grep -qE '^[0-9]{6,}:[A-Za-z0-9_-]{30,}$'; then
+    echo "[heartbeat] Telegram probe: BOT_TOKEN is not a real bot token (sentinel/placeholder/empty) — skipping"
   else
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
       "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>/dev/null || echo "000")
@@ -239,6 +249,10 @@ else
     while IFS= read -r other_env; do
       other_token=$(grep -oP '(?<=^BOT_TOKEN=)\S+' "$other_env" 2>/dev/null || true)
       [[ -z "$other_token" ]] && continue
+      # Same positive gate. Without it, every agent sharing a SENTINEL is
+      # reported as sharing a CREDENTIAL — a false alarm that is confident,
+      # reproducible and completely wrong about what it measured.
+      printf '%s' "$other_token" | grep -qE '^[0-9]{6,}:[A-Za-z0-9_-]{30,}$' || continue
       other_md5=$(printf '%s' "$other_token" | md5sum | cut -d' ' -f1)
       if [[ "$other_md5" == "$MY_MD5" ]]; then
         other_agent=$(basename "$(dirname "$other_env")")
