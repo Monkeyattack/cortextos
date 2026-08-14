@@ -72,21 +72,21 @@ Crons created during this session live in `${CTX_ROOT}/.cortextOS/state/agents/$
 
 ### Example 1: Heartbeat interval cron
 ```bash
-cortextos bus add-cron $CTX_AGENT_NAME heartbeat "0 */6 * * *" "cortextos bus update-heartbeat online"
+cortextos bus add-cron $CTX_AGENT_NAME heartbeat 6h "cortextos bus update-heartbeat online"
 ```
-This fires every 6 hours at the top of the hour, updating your heartbeat.
+This fires every 6 hours, updating your heartbeat.
 
 ### Example 2: Cron expression schedule
 ```bash
-cortextos bus add-cron $CTX_AGENT_NAME daily-standup "0 9 * * MON-FRI" "cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Daily standup time'"
+cortextos bus add-cron $CTX_AGENT_NAME daily-standup "0 9 * * 1-5" "cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Daily standup time'"
 ```
-This fires every weekday at 9:00 AM.
+This fires every weekday at 9:00 AM using a 5-field cron expression.
 
 ### Example 3: Offset cron to avoid stampede
 ```bash
-cortextos bus add-cron $CTX_AGENT_NAME check-inbox "0 */5 * * * :17" "cortextos bus check-inbox"
+cortextos bus add-cron $CTX_AGENT_NAME check-inbox "5 */1 * * *" "cortextos bus check-inbox"
 ```
-This fires every 5 minutes at :17 seconds of the hour, preventing the thundering herd problem when multiple agents check at the same time.
+This fires every 1 hour at :05 minutes past the hour, preventing the thundering herd problem when multiple agents check at the same time.
 
 ### Testing and monitoring
 **Test a cron fire:** Use the dashboard UI or command:
@@ -98,6 +98,8 @@ cortextos bus test-cron-fire $CTX_AGENT_NAME <cron-name>
 ```bash
 cortextos bus get-cron-log $CTX_AGENT_NAME <cron-name>
 ```
+
+For full details on cron management (add, update, remove, troubleshooting), see the `cron-management` skill documentation.
 
 ---
 
