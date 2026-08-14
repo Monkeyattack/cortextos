@@ -58,7 +58,7 @@ Four exit types, in priority order:
 
 ## Gate status and series (VALIDATED)
 
-**Skip Fridays:** `SKIP_FRIDAYS = True` (backtest variable name, `pd.dayofweek == 4`) — strategy does not trade Friday sessions. Fix committed 374f375 (orbfutures master, Jul 31 16:00 UTC) — also adds VIX<22 gate (backtest: `VIX_MAX = 22.0`) and corrects range window to include 10:30 bar. Prior live code had SkipMondays (wrong) + no VIX gate + range excluded 10:30 bar. **NT8 recompile DONE — Chris confirmed 2026-08-01 8:37 PM CT (chief relay). First corrected-config session: Mon Aug 3 (my prior "Mon Aug 4" was a day-of-week error — Aug 4 is Tuesday; caught by devops).** Prior stamped SkipMondays artifact (stamp 826dc4d3) voided by fable-reviewer 2026-07-31, superseded by 374f375.
+**Skip Fridays:** `SKIP_FRIDAYS = True` (backtest variable name, `pd.dayofweek == 4`) — strategy does not trade Friday sessions. Fix committed 374f375 (orbfutures master, Jul 31 16:00 UTC) — also adds VIX<22 gate (backtest: `VIX_MAX = 22.0`) and corrects range window to include 10:30 bar. Prior live code had SkipMondays (wrong) + no VIX gate + range excluded 10:30 bar. **NT8 recompile DONE — Chris confirmed 2026-08-01 8:37 PM CT (chief relay). First corrected-config session: Mon Aug 3 (my prior "Mon Aug 4" was a day-of-week error — Aug 4 is Tuesday; caught by devops).** <!-- dw-skip: quoted mention of the corrected error, not a live claim (fable-reviewer, chief ruling (b) 2026-08-13) --> Prior stamped SkipMondays artifact (stamp 826dc4d3) voided by fable-reviewer 2026-07-31, superseded by 374f375.
 
 **Official series (post-exclusion-ruling 2026-07-29):**
 - Valid days: query trades DB — `SELECT COUNT(DISTINCT t.entry_time::date) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL` (do not hardcode count — use DB as source of truth; returns 7 as of 2026-08-04 EOD. COUNT(DISTINCT date), not COUNT(*): the series counts DAYS — verified equal to COUNT(*) through 2026-08-04, but they diverge on the first multi-trade day)
@@ -72,7 +72,7 @@ Four exit types, in priority order:
 - Record as of 2026-08-06 EOD: **8W / 1L (9/30)** (DB-authoritative: SELECT COUNT(DISTINCT t.entry_time::date) FROM trades t LEFT JOIN h137_trade_exclusions e ON t.id=e.trade_id WHERE t.strategy_name='H137_BilateralBreakout' AND t.account_name='PAAPEX4333770000017' AND e.trade_id IS NULL — returned 9 as of 2026-08-10)
 - Pilot P&L as of 2026-08-06 EOD: **+$700.00** (day 9: Aug-6 Short +$6.25; stale: +$306.25 @Aug-4, +$693.75 @Aug-5)
 - **Aug-6 (day 9):** pilot Short +$6.25, no named exit (manual). h137_trade_exclusions does NOT exclude Aug-6 — counts per DB. Prior pack note "Days 9+10 excluded" was stale/prospective; Aug-6 is valid. Same named-day-override class as Jul-24/Aug-3/Aug-4/Aug-5 pending explicit Chris ruling (not yet received; DB is authoritative in absence of exclusion).
-- No trades Aug 7–10 on pilot (Aug 7=Thu, Aug 8=Fri skip, Aug 9=Sat, Aug 10=Sun). Next window: Mon Aug 11.
+- No trades Aug 7–10 on pilot (Aug 7=Fri skip, Aug 8=Sat, Aug 9=Sun, Aug 10=Mon). Next window: Tue Aug 11. [CORRECTED 2026-08-13: prior text had day-of-week wrong by 1 day — second day-of-week error caught in this doc; re-stamp required]
 
 **Payout thresholds (minimum win filters do NOT apply — these are payout minimums):**
 - MFF: $150 minimum per payout
