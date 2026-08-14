@@ -64,6 +64,42 @@ Complete the following in order. Do not skip steps.
 
 ---
 
+## External Persistent Crons
+
+Crons created during this session live in `${CTX_ROOT}/.cortextOS/state/agents/${CTX_AGENT_NAME}/crons.json` and survive restarts automatically. The daemon scheduler owns cron dispatch — you don't need to restore them manually.
+
+**First boot:** If you have session-only crons from a prior `/loop` or `CronCreate`, they do NOT migrate to the persistent store. You will need to recreate them using `cortextos bus add-cron`. After conversion, a `.crons-migrated` marker file will be created to indicate the migration is complete.
+
+### Example 1: Heartbeat interval cron
+```bash
+cortextos bus add-cron $CTX_AGENT_NAME heartbeat "0 */6 * * *" "cortextos bus update-heartbeat online"
+```
+This fires every 6 hours at the top of the hour, updating your heartbeat.
+
+### Example 2: Cron expression schedule
+```bash
+cortextos bus add-cron $CTX_AGENT_NAME daily-standup "0 9 * * MON-FRI" "cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Daily standup time'"
+```
+This fires every weekday at 9:00 AM.
+
+### Example 3: Offset cron to avoid stampede
+```bash
+cortextos bus add-cron $CTX_AGENT_NAME check-inbox "0 */5 * * * :17" "cortextos bus check-inbox"
+```
+This fires every 5 minutes at :17 seconds of the hour, preventing the thundering herd problem when multiple agents check at the same time.
+
+### Testing and monitoring
+**Test a cron fire:** Use the dashboard UI or command:
+```bash
+cortextos bus test-cron-fire $CTX_AGENT_NAME <cron-name>
+```
+
+**View execution history:** Get logs of all past cron fires:
+```bash
+cortextos bus get-cron-log $CTX_AGENT_NAME <cron-name>
+```
+
+---
 
 ## Guardrails
 
