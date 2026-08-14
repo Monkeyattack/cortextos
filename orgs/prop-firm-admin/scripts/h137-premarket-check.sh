@@ -44,14 +44,20 @@ BLOWN_ACCOUNTS=(
   'TAKEPROFITPRO392542906' # dead account, chief confirmed 2026-08-06
   'PPNTPPX50024895000001'  # dead account, chief confirmed 2026-08-06
   'TDFYG50201122518'       # blown, Chris confirmed "Nope. Blown" 2026-08-06 morning brief via fable-reviewer
+  'APEX4333770000091'      # blown, Chris confirmed "91 is blown. Intraday drawdown hit." 2026-08-14 13:22:18Z direct to fable-reviewer. Both strategies (H137 + MarketOpenFlip) went stale together 2026-08-13 22:15/22:16Z = Apex-side termination. Note: eod_balance showed +$9,625 / $315,013.20 on 08-13 — an EOD close can never exclude an intraday drawdown breach.
 )
 
 # Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
 # Each entry MUST carry a reason and a removal condition.
 SUPPRESSED_PAIRS=(
   'PPNTF100024895000002|MarketOpenFlip'  # tombstone-gap: detached strategy, pending Chris decision — remove when task_1784882768044 ships
-  'APEX4333770000091|MarketOpenFlip'     # tombstone-gap: strategy removed from live state 2026-07-30, matches PPNTETL roster adjustment pattern — remove after Chris confirms in morning brief
 )
+# REMOVED 2026-08-14: 'APEX4333770000091|MarketOpenFlip' (tombstone-gap, added 2026-07-30, removal
+# condition "after Chris confirms in morning brief"). Condition met — Chris confirmed the ACCOUNT
+# blown 2026-08-14, so the whole account moved to BLOWN_ACCOUNTS above and the pair entry is
+# redundant. Kept as a comment because that entry masked one leg of a real account death for the
+# ~15h between the 22:15Z drop and the confirmation: MarketOpenFlip was suppressed while
+# H137 alerted, which made an account-wide failure read as a single-strategy one.
 
 is_blown() {
   local acct="$1" b
@@ -192,7 +198,7 @@ NT8_GHOST_COUNT=0
 while IFS='|' read -r acct strat age_h; do
   [ -z "$acct" ] && continue
   if is_blown "$acct"; then
-    echo "[premarket-check] BLOWN: ${strat} / ${acct}: excluded (confirmed blown 2026-08-05)"
+    echo "[premarket-check] BLOWN: ${strat} / ${acct}: excluded (see BLOWN_ACCOUNTS for the per-account confirmation date)"
     SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
     continue
   fi

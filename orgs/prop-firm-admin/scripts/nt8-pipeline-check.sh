@@ -68,6 +68,16 @@ if (( ROW_COUNT == 0 )); then
 fi
 
 # --- 2. Per-row staleness, gated on a live heartbeat for that account ------
+# NOTE (2026-08-14): this exclusion list is a HAND-MAINTAINED DUPLICATE of BLOWN_ACCOUNTS in
+# scripts/h137-premarket-check.sh. Two lists, two edits, and nothing enforces that they agree —
+# a blown account added to one and not the other keeps alerting from the surface you forgot.
+# APEX4333770000091 was added to both on 2026-08-14 (Chris: "91 is blown. Intraday drawdown hit.",
+# 13:22:18Z). If you touch one list, touch the other.
+#
+# Worth knowing for future triage of this shape: a blown account can keep a LIVE ACCOUNT HEARTBEAT
+# while its strategies go stale. 091 had 117 heartbeats in the 2h AFTER termination (latest
+# 08-14 13:26:12Z) with both strategies dead since 08-13 22:15Z. That is why the EXISTS-heartbeat
+# gate below did not suppress it: NT8 still sees the account, only the strategies are gone.
 STALE_ROWS=$(psql "$DB" -tA -F'|' -c "
   SELECT s.account_name,
          s.strategy_name,
@@ -82,7 +92,8 @@ STALE_ROWS=$(psql "$DB" -tA -F'|' -c "
       'PAAPEX4333770000002',
       'TAKEPROFITPRO392542906',
       'PPNTPPX50024895000001',
-      'TDFYG50201122518'
+      'TDFYG50201122518',
+      'APEX4333770000091'
     )
     AND s.last_seen < now() - interval '${STALE_THRESHOLD_HOURS} hours'
     AND s.last_seen > now() - interval '${DETACHED_AFTER_DAYS} days'
