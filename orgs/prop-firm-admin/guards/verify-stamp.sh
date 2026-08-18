@@ -43,37 +43,32 @@ BASENAME=$(basename "$FILE")
 
 # ── Grep stamps for a PASS entry with this hash ─────────────────────────────
 # Accept any scope if caller didn't specify one; otherwise require scope match.
-if [[ -n "$SCOPE" ]]; then
-  MATCH=$(python3 -c "
-import json, sys
+# HASH/SCOPE/STAMPS_FILE are passed via environment, never interpolated into the
+# python source: a caller-supplied scope containing a quote must be DATA, not
+# code. Raw interpolation here was a quote-breakout that could force a PASS
+# verdict out of the very script whose job is fail-closed verification.
+MATCH=$(VS_STAMPS="$STAMPS_FILE" VS_HASH="$HASH" VS_SCOPE="$SCOPE" python3 -c '
+import json, os
+stamps = os.environ["VS_STAMPS"]
+want_hash = os.environ["VS_HASH"]
+want_scope = os.environ.get("VS_SCOPE", "")
 found = False
-with open('$STAMPS_FILE') as f:
+with open(stamps) as f:
     for line in f:
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
         try:
             e = json.loads(line)
-            if e.get('sha256') == '$HASH' and e.get('verdict') == 'PASS' and e.get('scope','') == '$SCOPE':
-                found = True; break
-        except: pass
-print('1' if found else '0')
-" 2>/dev/null || echo "0")
-else
-  MATCH=$(python3 -c "
-import json, sys
-found = False
-with open('$STAMPS_FILE') as f:
-    for line in f:
-        line = line.strip()
-        if not line: continue
-        try:
-            e = json.loads(line)
-            if e.get('sha256') == '$HASH' and e.get('verdict') == 'PASS':
-                found = True; break
-        except: pass
-print('1' if found else '0')
-" 2>/dev/null || echo "0")
-fi
+        except json.JSONDecodeError:
+            continue
+        if e.get("sha256") == want_hash and e.get("verdict") == "PASS":
+            if want_scope and e.get("scope", "") != want_scope:
+                continue
+            found = True
+            break
+print("1" if found else "0")
+' 2>/dev/null || echo "0")
 
 # ── Log verification attempt ─────────────────────────────────────────────────
 LOG_ENTRY="{\"ts\":\"$TIMESTAMP\",\"file\":\"$BASENAME\",\"hash\":\"$HASH\",\"scope\":\"$SCOPE\",\"result\":\"$([ "$MATCH" = "1" ] && echo PASS || echo REJECT)\"}"
