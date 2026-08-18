@@ -857,9 +857,35 @@ export class AgentProcess {
       const docPath = readFileSync(markerPath, 'utf-8').trim();
       unlinkSync(markerPath);
       if (!docPath || !existsSync(docPath)) return '';
+      this.mirrorHandoffToRemember(docPath);
       return ` CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state.`;
     } catch {
       return '';
+    }
+  }
+
+  /**
+   * Mirror the handoff doc into <agentDir>/.remember/remember.md.
+   *
+   * The remember plugin's SessionStart hook injects .remember/remember.md as
+   * "LAST HANDOFF" on every boot, but only the manual /remember skill ever
+   * writes that file. cortextos handoffs write memory/handoffs/*.md instead, so
+   * the slot freezes at whatever was last written by hand and stale state is
+   * re-injected on every subsequent boot (observed on writer_amazonians: Aug-4
+   * state re-delivered 106 times). Mirroring at consume time keeps the plugin's
+   * slot current without touching the vendored plugin.
+   *
+   * Best-effort only: a mirror failure must never break the handoff itself, so
+   * every error is swallowed here rather than escaping to consumeHandoffBlock.
+   */
+  private mirrorHandoffToRemember(docPath: string): void {
+    try {
+      if (!this.env.agentDir) return;
+      const rememberDir = join(this.env.agentDir, '.remember');
+      ensureDir(rememberDir);
+      writeFileSync(join(rememberDir, 'remember.md'), readFileSync(docPath, 'utf-8'), 'utf-8');
+    } catch {
+      /* best-effort mirror — never break the handoff */
     }
   }
 
