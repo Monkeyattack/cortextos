@@ -14,17 +14,58 @@ set -u
 DB="postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard"
 CT_TIME=$(TZ=America/Chicago date '+%I:%M %p CT')
 CT_HOUR=$(( 10#$(TZ=America/Chicago date '+%H') ))
-BOT_TOKEN="8649138124:AAE2C5QfE2mSCgtHDo_ggveXKfmUvdA1hdo"
-CHAT_ID="6585156851"
+# Credentials come from the devops agent .env, never from this file. They were
+# hardcoded here in plaintext until 2026-08-12; the token in git history and in
+# any copy of this script older than that date must be treated as exposed.
+# Fail-closed: if the token cannot be read, the script exits rather than running
+# a live-capital health check whose alerts silently go nowhere.
+DEVOPS_ENV_FILE="${DEVOPS_ENV_FILE:-/home/claude-dev/cortextos/orgs/prop-firm-admin/agents/devops/.env}"
+read_env_value() {
+  local key="$1" file="$2"
+  [[ -r "$file" ]] || return 1
+  sed -n "s/^${key}=//p" "$file" | head -n 1 | tr -d '\042\047'
+}
+BOT_TOKEN="${BOT_TOKEN:-$(read_env_value BOT_TOKEN "$DEVOPS_ENV_FILE" || true)}"
+CHAT_ID="${CHAT_ID:-$(read_env_value CHAT_ID "$DEVOPS_ENV_FILE" || true)}"
+if [[ -z "${BOT_TOKEN:-}" || -z "${CHAT_ID:-}" ]]; then
+  echo "[premarket-check] FATAL: BOT_TOKEN/CHAT_ID not readable from ${DEVOPS_ENV_FILE} — refusing to run a health check that cannot alert" >&2
+  exit 1
+fi
 PILOT_ACCOUNT="PAAPEX4333770000017"
 PILOT_STRATEGY="H137_BilateralBreakout"
+
+# Blown/retired accounts — permanently excluded from all alerts.
+# These accounts confirmed blown by Chris; their strategy_states rows are dead.
+BLOWN_ACCOUNTS=(
+  'PPNTETL25024895000005'  # blown, confirmed Chris 2026-08-05 morning brief
+  'PPNTETL25024895000006'  # blown, same terminal
+  'PPNTETL25024895000007'  # blown, same terminal
+  'PAAPEX4333770000002'    # PA02, payout-pull exit confirmed Chris 2026-08-05; PA01 replacing
+  'TAKEPROFITPRO392542906' # dead account, chief confirmed 2026-08-06
+  'PPNTPPX50024895000001'  # dead account, chief confirmed 2026-08-06
+  'TDFYG50201122518'       # blown, Chris confirmed "Nope. Blown" 2026-08-06 morning brief via fable-reviewer
+  'APEX4333770000091'      # blown, Chris confirmed "91 is blown. Intraday drawdown hit." 2026-08-14 13:22:18Z direct to fable-reviewer. Both strategies (H137 + MarketOpenFlip) went stale together 2026-08-13 22:15/22:16Z = Apex-side termination. Note: eod_balance showed +$9,625 / $315,013.20 on 08-13 — an EOD close can never exclude an intraday drawdown breach.
+)
 
 # Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
 # Each entry MUST carry a reason and a removal condition.
 SUPPRESSED_PAIRS=(
   'PPNTF100024895000002|MarketOpenFlip'  # tombstone-gap: detached strategy, pending Chris decision — remove when task_1784882768044 ships
-  'APEX4333770000091|MarketOpenFlip'     # tombstone-gap: strategy removed from live state 2026-07-30, matches PPNTETL roster adjustment pattern — remove after Chris confirms in morning brief
 )
+# REMOVED 2026-08-14: 'APEX4333770000091|MarketOpenFlip' (tombstone-gap, added 2026-07-30, removal
+# condition "after Chris confirms in morning brief"). Condition met — Chris confirmed the ACCOUNT
+# blown 2026-08-14, so the whole account moved to BLOWN_ACCOUNTS above and the pair entry is
+# redundant. Kept as a comment because that entry masked one leg of a real account death for the
+# ~15h between the 22:15Z drop and the confirmation: MarketOpenFlip was suppressed while
+# H137 alerted, which made an account-wide failure read as a single-strategy one.
+
+is_blown() {
+  local acct="$1" b
+  for b in "${BLOWN_ACCOUNTS[@]}"; do
+    [ "$b" = "$acct" ] && return 0
+  done
+  return 1
+}
 
 is_suppressed() {
   local pair="$1" s
@@ -156,6 +197,11 @@ SUPPRESSED_COUNT=0
 NT8_GHOST_COUNT=0
 while IFS='|' read -r acct strat age_h; do
   [ -z "$acct" ] && continue
+  if is_blown "$acct"; then
+    echo "[premarket-check] BLOWN: ${strat} / ${acct}: excluded (see BLOWN_ACCOUNTS for the per-account confirmation date)"
+    SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
+    continue
+  fi
   if is_suppressed "${acct}|${strat}"; then
     echo "[premarket-check] SUPPRESSED: ${strat} / ${acct}: ${age_h}h stale (known false-positive)"
     SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
@@ -187,7 +233,7 @@ if [ "$STALE_COUNT" -eq 0 ]; then
 fi
 
 MSG="PRE-MARKET RED (${CT_TIME}): ${STALE_COUNT} ACTIVE strategies stale >2h (NT8 offline or DLL failure):
-${STALE_LIST}Verify NT8 terminals (HolyGrail/Vincere) before H137 window opens 9:30 ET.${ZOMBIE_NOTE}"
+${STALE_LIST}Verify NT8 terminals (HolyGrail/Vincere) before market open.${ZOMBIE_NOTE}"
 
 echo "[premarket-check] RED: ${STALE_COUNT} stale strategies${ZOMBIE_NOTE}"
 echo "$STALE_LIST"
