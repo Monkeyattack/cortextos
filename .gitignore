@@ -10,7 +10,28 @@ dist/
 ecosystem.config.js
 
 # User-created org data (not part of the framework)
-orgs/
+#
+# Operational scripts under orgs/ ARE part of the framework and must be versioned.
+# Before 2026-08-14 this was a blanket `orgs/` ignore with ~25 files force-added
+# past it, so which live scripts had history was arbitrary: agents/devops/tools/
+# orb-status-staleness.sh was tracked while scripts/h137-premarket-check.sh — a
+# live-capital alerting path that Telegrams Chris directly — was not. The carve-out
+# below states the rule instead of leaving it to whoever remembered `git add -f`.
+#
+# `orgs/**` (not `orgs/`) is deliberate: git cannot re-include a path whose parent
+# directory is excluded, so each parent level needs its own negation to be
+# descendable. Secrets stay excluded by `orgs/**` plus the standalone `.env` rule
+# below — do not add a negation that reaches a .env, a token, or agent state.
+orgs/**
+!orgs/*/
+!orgs/*/scripts/
+!orgs/*/scripts/**
+!orgs/*/guards/
+!orgs/*/guards/**
+!orgs/*/agents/
+!orgs/*/agents/*/
+!orgs/*/agents/*/tools/
+!orgs/*/agents/*/tools/**
 # But community subdirectories ARE part of the framework
 !community/
 !community/**
