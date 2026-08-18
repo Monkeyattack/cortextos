@@ -208,7 +208,7 @@ export interface AgentConfig {
    * 'opencode' selects the OpencodePTY spawn path, a native PTY terminal
    * runtime for opencode.ai's OpenCode CLI.
    */
-  runtime?: 'claude-code' | 'hermes' | 'codex-app-server' | 'opencode';
+  runtime?: 'claude-code' | 'hermes' | 'codex-app-server' | 'opencode' | 'kimi';
   /**
    * Optional OpenCode agent name to pass as `opencode --agent <name>`.
    * Only applies to runtime: 'opencode'.

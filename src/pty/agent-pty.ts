@@ -208,7 +208,17 @@ export class AgentPTY {
       }
       if (showingTrust && !trustHandled) {
         trustHandled = true;
-        this.pty.write('\r');     // trust screen default is "Yes, I trust"
+        const trustKeys = this.getTrustKeystrokes();
+        if (trustKeys.endsWith('\r') && trustKeys.length > 1) {
+          // Multi-key sequence: send navigation first, then confirm after a delay
+          // so the TUI has time to register the selection change before Enter.
+          this.pty.write(trustKeys.slice(0, -1));
+          setTimeout(() => {
+            if (this.pty) this.pty.write('\r');
+          }, 350);
+        } else {
+          this.pty.write(trustKeys);
+        }
         return;
       }
       // No first-run prompt pending and the real session is up -> stop polling so we
@@ -217,6 +227,15 @@ export class AgentPTY {
     }, 1200);
     // Unconditional backstop: never let the poll outlive first-run.
     setTimeout(() => clearInterval(promptPoll), 20000);
+  }
+
+  /**
+   * Keystrokes to send when the "Trust this folder?" prompt appears.
+   * Claude Code default is "Yes, I trust" so bare Enter (\r) accepts.
+   * Runtimes where the default selection is NOT trust should override this.
+   */
+  protected getTrustKeystrokes(): string {
+    return '\r';
   }
 
   /**

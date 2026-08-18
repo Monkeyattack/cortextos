@@ -5,6 +5,7 @@ import type { AgentConfig, AgentStatus, CtxEnv } from '../types/index.js';
 import { AgentPTY } from '../pty/agent-pty.js';
 import { CodexAppServerPTY } from '../pty/codex-app-server-pty.js';
 import { HermesPTY, hermesDbExists } from '../pty/hermes-pty.js';
+import { KimiPTY } from '../pty/kimi-pty.js';
 import { OpencodePTY, opencodeSessionExists } from '../pty/opencode-pty.js';
 import { MessageDedup, injectMessage as injectMessageIntoPty } from '../pty/inject.js';
 import type { TelegramAPI } from '../telegram/api.js';
@@ -140,7 +141,9 @@ export class AgentProcess {
         ? new OpencodePTY(this.env, this.config, logPath)
         : this.config.runtime === 'codex-app-server'
           ? new CodexAppServerPTY(this.env, this.config, logPath)
-          : new AgentPTY(this.env, this.config, logPath);
+          : this.config.runtime === 'kimi'
+            ? new KimiPTY(this.env, this.config, logPath)
+            : new AgentPTY(this.env, this.config, logPath);
 
     // Issue #330: re-wire the Telegram handle on every start() (session refresh
     // creates a fresh CodexAppServerPTY). Only CodexAppServerPTY uses this — Claude / Hermes
