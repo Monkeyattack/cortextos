@@ -173,13 +173,22 @@ export const startCommand = new Command('start')
         }
       } catch { /* ignore */ }
 
-      if (!enabledAgents[agent]) {
-        // Try to detect org from existing entries or project structure
-        const existingOrg = Object.values(enabledAgents as Record<string, any>).find((e: any) => e.org)?.org;
+      // Register or re-enable: if not present OR explicitly disabled, set enabled:true.
+      // Preserves org when already known. Without this, agents that were previously
+      // `cortextos disable`d (enabled:false) stay dead after a daemon restart even
+      // when `cortextos start` is called — the daemon reads enabled:false and skips
+      // them (BUG-028 guard), causing the entire fleet to sit dead until manually
+      // re-enabled. 2026-08-19 incident: 14/16 agents down for 2h46m post-restart.
+      if (!enabledAgents[agent] || enabledAgents[agent].enabled === false) {
+        const existingEntry = enabledAgents[agent] ?? {};
+        // Try to detect org from existing entry, then from other entries
+        const org = existingEntry.org
+          || Object.values(enabledAgents as Record<string, any>).find((e: any) => e.org)?.org;
         enabledAgents[agent] = {
+          ...existingEntry,
           enabled: true,
           status: 'configured',
-          ...(existingOrg ? { org: existingOrg } : {}),
+          ...(org ? { org } : {}),
         };
         mkdirSync(join(ctxRoot, 'config'), { recursive: true });
         writeFileSync(enabledPath, JSON.stringify(enabledAgents, null, 2) + '\n', 'utf-8');
