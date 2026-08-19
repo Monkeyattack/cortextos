@@ -9,7 +9,8 @@ if [[ $DOW -ge 6 ]]; then echo "[h137-monitor] MARKET CLOSED (weekend) — $(dat
 
 set -u
 
-DB_URL="postgresql://orbfutures:orbfutures@127.0.0.1/orbfutures_dashboard"
+DB_URL="${ORB_DB:-}"
+if [[ -z "$DB_URL" ]]; then echo "[h137-monitor] ERROR: ORB_DB not set" >&2; exit 0; fi
 ACCOUNT="PAAPEX4333770000017"
 STRATEGY="H137_BilateralBreakout"
 
@@ -83,26 +84,11 @@ WHERE="account_name='${ACCOUNT}' AND strategy_name='${STRATEGY}' AND exit_time I
 # ── Pre-session integrity checks (run all, report all, then bail if any RED) ──
 PRE_RED=0
 
-# 1. Qty gate — gated pilot config: Contracts=1
-# Scoped to CURRENT SESSION only (entry_time >= today CT) to avoid re-flagging
-# adjudicated historical fills (e.g. the 3-lot manual exit excluded 2026-07-16).
-GATED_QTY=1
-LAST_QTY=$(psql_q "SELECT qty FROM executions
-                   WHERE account_name='${ACCOUNT}'
-                     AND instrument LIKE 'MES%'
-                     AND timestamp >= DATE_TRUNC('day', NOW() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago'
-                   ORDER BY timestamp DESC LIMIT 1;")
-# NOTE: CURRENT_DATE AT TIME ZONE 'America/Chicago' is WRONG — postgres converts
-# UTC midnight BACKWARD to Chicago (19:00 UTC prior day in CDT), not forward.
-# Use DATE_TRUNC('day', NOW() AT TIME ZONE tz) AT TIME ZONE tz for local midnight in UTC.
-if [ -n "$LAST_QTY" ] && [ "$LAST_QTY" -ne "$GATED_QTY" ]; then
-  MSG="H137 TRIPWIRE RED: qty GATE VIOLATION — last fill qty=${LAST_QTY} vs gated config Contracts=${GATED_QTY}. Verify NT8 strategy Contracts parameter and pause until confirmed."
-  echo "$MSG"
-  _send_tripwire_red "$MSG"
-  PRE_RED=1
-fi
+# Qty gate REMOVED 2026-08-18 — H137 scales 5-10ct per account by design (scaled 2026-07-24).
+# A single GATED_QTY ceiling always false-fires on multi-contract sizing.
+# Chris confirmed via Telegram: "We haven't had that 1 contract rule for a while. It's a waste of effort."
 
-# 2. Co-strategy check — ONE ACCOUNT, ONE STRATEGY rule.
+# 1. Co-strategy check — ONE ACCOUNT, ONE STRATEGY rule.
 # NT8 heartbeats ALL loaded strategies (state=Active even if unassigned/not trading).
 # Gate on actual trade activity (entry in trades table within 7d) to avoid false RED
 # on strategies that are loaded-in-terminal but have no live positions or fills.
