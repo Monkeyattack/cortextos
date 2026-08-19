@@ -27,6 +27,7 @@ export interface OAuthAccount {
   last_refreshed: string; // ISO 8601
   five_hour_utilization: number; // 0.0–1.0
   seven_day_utilization: number; // 0.0–1.0
+  usage_detail?: UsageDetail;
 }
 
 export interface AccountsStore {
@@ -44,6 +45,49 @@ export interface RotationLogEntry {
   seven_day_util: number;
 }
 
+export interface ExtraUsageInfo {
+  is_enabled: boolean;
+  monthly_limit: number | null;
+  used_credits: number | null;
+  utilization: number | null;
+  currency: string | null;
+  decimal_places: number | null;
+  disabled_reason: string | null;
+  user_disabled: boolean;
+  spend_limit_reached: boolean;
+  credits_ever_enabled: boolean;
+  daily: unknown;
+  weekly: unknown;
+}
+
+export interface SpendSummary {
+  used_minor: number | null;
+  limit_minor: number | null;
+  currency: string | null;
+  exponent: number | null;
+  percent: number | null;
+  severity: string | null;
+  enabled: boolean | null;
+}
+
+export interface LimitEntry {
+  kind: string;
+  group: string;
+  percent: number;
+  severity: string;
+  resets_at: string | null;
+  is_active: boolean;
+  scope_model?: string; // flattened from scope.model.display_name
+}
+
+export interface UsageDetail {
+  seven_day_resets_at?: string | null;
+  five_hour_resets_at?: string | null;
+  extra_usage?: ExtraUsageInfo;
+  spend?: SpendSummary;
+  limits?: LimitEntry[];
+}
+
 export interface UsageSnapshot {
   account: string;
   five_hour_utilization: number;
@@ -56,12 +100,13 @@ export interface UsageCache {
   expires_at: number; // Unix ms
 }
 
-export interface CheckUsageResult {
-  account: string;
-  five_hour_utilization: number;
-  seven_day_utilization: number;
+export interface CheckUsageResult extends UsageSnapshot {
   cached: boolean;
-  fetched_at: string;
+  five_hour_resets_at?: string | null;
+  seven_day_resets_at?: string | null;
+  extra_usage?: ExtraUsageInfo;
+  spend?: SpendSummary;
+  limits?: LimitEntry[];
 }
 
 export interface RotateResult {
@@ -224,12 +269,29 @@ export async function checkUsageApi(
   // hid Sondre's actual quota in the dashboard. Keep flat fallbacks in
   // case the API ever returns either shape.
   const data = await response.json() as {
-    five_hour?: { utilization?: number };
-    seven_day?: { utilization?: number };
+    five_hour?: { utilization?: number; resets_at?: string | null };
+    seven_day?: { utilization?: number; resets_at?: string | null };
     five_hour_utilization?: number;
     seven_day_utilization?: number;
     fiveHourUtilization?: number;
     sevenDayUtilization?: number;
+    extra_usage?: ExtraUsageInfo | null;
+    spend?: {
+      used?: { amount_minor?: number | null; currency?: string | null; exponent?: number | null } | null;
+      limit?: { amount_minor?: number | null; exponent?: number | null } | null;
+      percent?: number | null;
+      severity?: string | null;
+      enabled?: boolean | null;
+    } | null;
+    limits?: Array<{
+      kind?: string;
+      group?: string;
+      percent?: number;
+      severity?: string;
+      resets_at?: string | null;
+      is_active?: boolean;
+      scope?: { model?: { id?: string | null; display_name?: string | null } | null; surface?: unknown } | null;
+    }> | null;
   };
 
   // Normalize 0–100 → 0.0–1.0 if needed
@@ -253,17 +315,53 @@ export async function checkUsageApi(
     fetched_at: fetchedAt,
   };
 
-  // Update cache and accounts.json utilization fields
+  // Surface optional detail fields — only present when API returns them so
+  // callers can distinguish "field absent" from "field present but null/0".
+  const detail: UsageDetail = {};
+  if ('resets_at' in (data.five_hour ?? {})) detail.five_hour_resets_at = data.five_hour!.resets_at;
+  if ('resets_at' in (data.seven_day ?? {})) detail.seven_day_resets_at = data.seven_day!.resets_at;
+  if (data.extra_usage != null) detail.extra_usage = data.extra_usage;
+  if (data.spend != null) {
+    detail.spend = {
+      used_minor: data.spend.used?.amount_minor ?? null,
+      limit_minor: data.spend.limit?.amount_minor ?? null,
+      currency: data.spend.used?.currency ?? null,
+      exponent: data.spend.used?.exponent ?? null,
+      percent: data.spend.percent ?? null,
+      severity: data.spend.severity ?? null,
+      enabled: data.spend.enabled ?? null,
+    };
+  }
+  if (data.limits != null) {
+    detail.limits = data.limits.map((l) => {
+      const entry: LimitEntry = {
+        kind: l.kind ?? '',
+        group: l.group ?? '',
+        percent: l.percent ?? 0,
+        severity: l.severity ?? '',
+        resets_at: l.resets_at ?? null,
+        is_active: l.is_active ?? false,
+      };
+      const modelName = l.scope?.model?.display_name;
+      if (modelName != null) entry.scope_model = modelName;
+      return entry;
+    });
+  }
+
+  // Update cache and accounts.json utilization fields + usage_detail
   saveCache(ctxRoot, snapshot);
 
   const store = loadAccounts(ctxRoot);
   if (store && store.accounts[accountName]) {
     store.accounts[accountName].five_hour_utilization = fiveHour;
     store.accounts[accountName].seven_day_utilization = sevenDay;
+    if (Object.keys(detail).length > 0) {
+      store.accounts[accountName].usage_detail = detail;
+    }
     saveAccounts(ctxRoot, store);
   }
 
-  return { ...snapshot, cached: false };
+  return { ...snapshot, cached: false, ...detail };
 }
 
 // --- refresh-oauth-token ---
