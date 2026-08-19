@@ -113,7 +113,11 @@ export function hardRestart(paths: BusPaths, agentName: string, reason?: string)
  * Filters out dangerous files (credentials, env, large, binary).
  * Never pushes. Mirrors bash bus/auto-commit.sh.
  */
-export function autoCommit(projectDir: string, dryRun: boolean = false): AutoCommitReport {
+export function autoCommit(
+  projectDir: string,
+  dryRun: boolean = false,
+  allowedPaths: string[] = [],
+): AutoCommitReport {
   // Check if git repo
   try {
     execSync('git rev-parse --is-inside-work-tree', { cwd: projectDir, stdio: 'pipe' });
@@ -133,10 +137,19 @@ export function autoCommit(projectDir: string, dryRun: boolean = false): AutoCom
     return { status: 'clean', staged: [], blocked: [] };
   }
 
-  const changedFiles = porcelainOutput
+  let changedFiles = porcelainOutput
     .split('\n')
     .filter(line => line.trim())
     .map(line => line.slice(3)); // cut from column 4 (0-indexed col 3)
+
+  // When path filter is active, restrict to files under allowed prefixes only.
+  // This prevents a shared-repo agent from vacuuming files that belong to other
+  // agents or unrelated scaffold artifacts into its snapshot commit.
+  if (allowedPaths.length > 0) {
+    changedFiles = changedFiles.filter(f =>
+      allowedPaths.some(p => f === p || f.startsWith(p.endsWith('/') ? p : p + '/')),
+    );
+  }
 
   const staged: string[] = [];
   const blocked: string[] = [];
