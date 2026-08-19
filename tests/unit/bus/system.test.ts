@@ -173,6 +173,39 @@ describe('Bus System', () => {
       expect(report.status).toBe('nothing_to_stage');
       expect(report.blocked.length).toBeGreaterThan(0);
     });
+
+    it('path filter restricts staging to allowed prefixes only', () => {
+      // Pre-track both agent dirs so git reports individual file paths (not dir-level ??)
+      mkdirSync(join(gitDir, 'orgs', 'myorg', 'agents', 'analyst'), { recursive: true });
+      mkdirSync(join(gitDir, 'orgs', 'myorg', 'agents', 'other'), { recursive: true });
+      writeFileSync(join(gitDir, 'orgs', 'myorg', 'agents', 'analyst', 'MEMORY.md'), 'v1');
+      writeFileSync(join(gitDir, 'orgs', 'myorg', 'agents', 'other', 'MEMORY.md'), 'v1');
+      writeFileSync(join(gitDir, 'root-file.txt'), 'v1');
+      execSync('git add -A && git commit -m "seed"', { cwd: gitDir, stdio: 'pipe' });
+
+      // Now modify files — git status --porcelain shows each path individually
+      writeFileSync(join(gitDir, 'orgs', 'myorg', 'agents', 'analyst', 'MEMORY.md'), 'analyst updated');
+      writeFileSync(join(gitDir, 'orgs', 'myorg', 'agents', 'other', 'MEMORY.md'), 'other updated');
+      writeFileSync(join(gitDir, 'root-file.txt'), 'root updated');
+
+      const report = autoCommit(gitDir, true, ['orgs/myorg/agents/analyst']);
+      expect(report.status).toBe('dry_run');
+      expect(report.staged).toContain('orgs/myorg/agents/analyst/MEMORY.md');
+      expect(report.staged).not.toContain('orgs/myorg/agents/other/MEMORY.md');
+      expect(report.staged).not.toContain('root-file.txt');
+    });
+
+    it('path filter with no matching files returns nothing_to_stage', () => {
+      // Track root-file.txt so it appears individually in git status
+      writeFileSync(join(gitDir, 'root-file.txt'), 'v1');
+      execSync('git add root-file.txt && git commit -m "seed"', { cwd: gitDir, stdio: 'pipe' });
+      writeFileSync(join(gitDir, 'root-file.txt'), 'updated');
+
+      const report = autoCommit(gitDir, true, ['orgs/myorg/agents/analyst']);
+      // Changed file exists but none match the path filter — nothing to stage
+      expect(report.status).toBe('nothing_to_stage');
+      expect(report.staged).toHaveLength(0);
+    });
   });
 
   describe('checkGoalStaleness', () => {

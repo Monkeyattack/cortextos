@@ -687,10 +687,11 @@ busCommand
   .command('auto-commit')
   .description('Stage safe files for commit (never pushes)')
   .option('--dry-run', 'Show what would be staged without modifying git')
-  .action((opts: { dryRun?: boolean }) => {
+  .option('--paths <paths...>', 'Restrict staging to files under these path prefixes (space-separated)')
+  .action((opts: { dryRun?: boolean; paths?: string[] }) => {
     const env = resolveEnv();
     const projectDir = env.projectRoot || env.frameworkRoot || process.cwd();
-    const report = autoCommit(projectDir, opts.dryRun ?? false);
+    const report = autoCommit(projectDir, opts.dryRun ?? false, opts.paths ?? []);
     console.log(JSON.stringify(report));
   });
 
