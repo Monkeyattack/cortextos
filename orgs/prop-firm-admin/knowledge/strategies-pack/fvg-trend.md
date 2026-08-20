@@ -33,11 +33,13 @@ A Fair Value Gap (FVG) trend-following strategy on MES. Identifies imbalance zon
 | TDFYG50201122518 | Live (real money) | MES 09-26 | 2 | -$132.50 | **STALE** — strategy_states dark; live leg effectively inactive. Tier downgraded pending Chris confirmation of account/strategy status. |
 | SimSim2 | SIM | MES 09-26 | 11 (excl. anomaly) | -$147.50 | Forward-test accumulation. Aug-19 sizing anomaly excluded from baseline (see below). |
 
-**30d adjusted baseline (excl. Aug-19 anomaly):** 13 trades total, -$280.00 combined (-$147.50 SimSim2 + -$132.50 TDFYG).
+**30d adjusted baseline (excl. Aug-19 anomaly):** 11 trades total, -$147.50 combined (-$15.00 SimSim2/9T + -$132.50 TDFYG/2T).
+
+**T count for futility gate:** SimSim2 SIM trades only — T=9. TDFYG (live account) excluded from gate T count per fable-reviewer C27 amendment.
 
 ## Sizing Incident — 2026-08-19 (EXCLUDE FROM PERFORMANCE BASELINE)
 
-SimSim2 entered a Long MES trade on 2026-08-19 at 10:36 CT with **qty=50 contracts** vs the standard qty=1 used in all prior 11 trades. The trade stopped out at -$3,125 (12.5 handles × $1.25/tick × 50 contracts). This is an NT8 configuration error — 50x amplification of a routine stop. 
+SimSim2 entered a Long MES trade on 2026-08-19 at 10:36 CT with **qty=50 contracts** vs the standard qty=1 used in all prior 9 SimSim2 trades. The trade stopped out at -$3,125 (12.5 handles × $1.25/tick × 50 contracts). This is an NT8 configuration error — 50x amplification of a routine stop. 
 
 **Action required:** Chris must reset SimSim2 FvgTrend position size to 1 contract before next trade. Filed as HUMAN task via chief (2026-08-20).
 
