@@ -1,5 +1,5 @@
-**Pack version:** 1.0.1 | **Status tier:** LIVE-ACCUMULATING + SIM-ACCUMULATING
-**Last updated:** 2026-08-20 | **Gate stamp:** fable-reviewer T=20 gate registered (C27, 2026-08-20)
+**Pack version:** 1.0.2 | **Status tier:** SIM-ACCUMULATING (live leg BLOWN)
+**Last updated:** 2026-08-20 | **Gate stamp:** fable-reviewer T=20 gate registered (C27, 2026-08-20) | **v1.0.2:** TDFYG live leg BLOWN
 
 > **v1.0.1 corrections (2026-08-20, analyst):**
 > - TDFYG50201122518 tier updated: strategy_states stale, live leg effectively inactive — marked blown/stale pending Chris confirmation.
@@ -30,7 +30,7 @@ A Fair Value Gap (FVG) trend-following strategy on MES. Identifies imbalance zon
 
 | Account | Type | Instrument | Trades (30d) | P&L (30d, adj) | Notes |
 |---------|------|------------|--------|-----|-------|
-| TDFYG50201122518 | Live (real money) | MES 09-26 | 2 | -$132.50 | **STALE** — strategy_states dark; live leg effectively inactive. Tier downgraded pending Chris confirmation of account/strategy status. |
+| TDFYG50201122518 | Live (real money) | MES 09-26 | 2 | -$132.50 | **BLOWN** — confirmed 2026-08-20 (chief). Live leg removed from active tracking. |
 | SimSim2 | SIM | MES 09-26 | 11 (excl. anomaly) | -$147.50 | Forward-test accumulation. Aug-19 sizing anomaly excluded from baseline (see below). |
 
 **30d adjusted baseline (excl. Aug-19 anomaly):** 11 trades total, -$147.50 combined (-$15.00 SimSim2/9T + -$132.50 TDFYG/2T).
@@ -52,7 +52,7 @@ SimSim2 entered a Long MES trade on 2026-08-19 at 10:36 CT with **qty=50 contrac
 - Aug-19 sizing anomaly excluded from evaluation
 - No promotion before T ≥ 40
 
-**TDFYG50201122518 (live):** Strategy_states dark (stale). Live leg effectively inactive — pending Chris confirmation. Pack tier update to STALE if confirmed inactive.
+**TDFYG50201122518 (live):** BLOWN — confirmed 2026-08-20 (chief). Live leg closed out. No further tracking.
 
 **SimSim2 (SIM):** T=12 (11 valid + 1 anomaly excluded). Current adjusted T=11 toward T=20 gate. Next review at T=20.
 
@@ -88,17 +88,18 @@ SimSim2 entered a Long MES trade on 2026-08-19 at 10:36 CT with **qty=50 contrac
 
 **2-trade total:** -$132.50
 
-**Language tier:** LIVE-ACCUMULATING (TDFYG, if active) / SIM-ACCUMULATING (SimSim2). Not validated. Do not cite performance as evidence of edge — sample is too small.
+**Language tier:** SIM-ACCUMULATING (SimSim2 only). Live leg (TDFYG) BLOWN. Not validated. Do not cite performance as evidence of edge — sample is too small.
 
 ## Monitoring notes
 
 - **SimSim2 sizing**: Must be 1 MES contract. HUMAN task filed 2026-08-20 for Chris to reset qty before next trade.
-- **TDFYG staleness**: Strategy_states dark — confirm with Chris if account/strategy still active.
+- **TDFYG**: BLOWN (confirmed 2026-08-20). No further monitoring needed.
 - **T=20 gate**: Evaluate at T=20 SimSim2 trades (excl. anomaly). Criteria pre-registered by fable-reviewer.
 - **Backtest baseline**: UNSET — analyst cannot run T=40 gate review without this. Flag to Chris at T=18.
 - **Live deploy gate gap**: Noted — no fable-reviewer stamp on original live deployment.
 
 ## Changelog
 
+- **1.0.2 (2026-08-20, analyst):** TDFYG live leg confirmed BLOWN (chief, 2026-08-20). Pack status tier updated to SIM-ACCUMULATING only. LIVE-ACCUMULATING language removed throughout.
 - **1.0.1 (2026-08-20, analyst):** Sizing incident documented (Aug-19 qty=50 anomaly, -$3,125 excluded from baseline). TDFYG tier downgraded to stale. Backtest baseline flagged UNSET. T=20 futility gate registered (fable-reviewer C27). Trade log expanded with per-trade breakdown.
 - **1.0.0 (2026-07-30):** Initial pack.
