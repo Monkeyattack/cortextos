@@ -28,7 +28,7 @@ v1.0.0 — initial pack, 10 strategies documented
 | File | Strategy | Tier | Instruments | Status |
 |------|----------|------|-------------|--------|
 | [h137-bilateral-breakout.md](h137-bilateral-breakout.md) | H137 BilateralBreakout | VALIDATED | MES | 4/30 series, 4W/0L |
-| [market-open-flip.md](market-open-flip.md) | MarketOpenFlip (MOF) | VALIDATED | NQ | 49T, +$15,276 |
+| [market-open-flip.md](market-open-flip.md) | MarketOpenFlip (MOF) | VALIDATED | MNQ (hedged pair) | 49T, +$15,276 |
 | [lucid-pro-flip.md](lucid-pro-flip.md) | LucidProFlip | LIVE-ACCUMULATING | NQ/MES | 7T, -$1,120 |
 | [fvg-trend.md](fvg-trend.md) | FvgTrend | LIVE-ACCUMULATING + SIM-ACCUMULATING | MES | 9T total (2 live, 7 SIM) |
 | [h178-vwap-band-reversion.md](h178-vwap-band-reversion.md) | VwapBandReversion (H178) | SIM-ACCUMULATING | MNQ | 1T SIM, T≥40 gate |
