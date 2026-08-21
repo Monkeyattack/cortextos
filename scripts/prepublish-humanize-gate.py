@@ -62,7 +62,9 @@ MAX_CHUNK_CHARS = 2000
 
 
 _SERVER_URL = "http://127.0.0.1:8421"
-_SERVER_API_KEY = "internal-prewarm"
+# Not a secret — server is bound to 127.0.0.1 only. This is a local sentinel tag,
+# not a credential. Override via UNTELL_API_KEY env var if the server config changes.
+_SERVER_API_KEY = os.environ.get("UNTELL_API_KEY", "internal-prewarm")
 
 
 def try_server_score(
@@ -124,12 +126,16 @@ def try_server_score(
         if res.get("tier") != "full":
             return None
 
+        try:
+            max_val = float(res.get("max") or 0.0)
+        except (TypeError, ValueError):
+            return None  # malformed max — unexpected shape, fall back to in-process
         results.append(
             {
                 "section": label,
                 "chars": len(body),
-                "max": res.get("max"),
-                "flagged": float(res.get("max") or 0.0) >= threshold,
+                "max": max_val,
+                "flagged": max_val >= threshold,
                 "tier": res.get("tier"),
                 "detectors": res.get("detectors"),
                 "warning": res.get("warning"),
