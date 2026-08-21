@@ -31,7 +31,10 @@ if [[ -z "${BOT_TOKEN:-}" || -z "${CHAT_ID:-}" ]]; then
   echo "[premarket-check] FATAL: BOT_TOKEN/CHAT_ID not readable from ${DEVOPS_ENV_FILE} — refusing to run a health check that cannot alert" >&2
   exit 1
 fi
-PILOT_ACCOUNT="PAAPEX4333770000017"
+# Pilot concept RETIRED 2026-08-21: H137 is live across many accounts, so no single
+# account carries P0 status. Empty PILOT_ACCOUNT disables the pilot-P0 path entirely
+# (see the -n guards below). Set it back to an account name to re-arm a pilot.
+PILOT_ACCOUNT=""
 PILOT_STRATEGY="H137_BilateralBreakout"
 
 # Blown/retired accounts — permanently excluded from all alerts.
@@ -45,12 +48,18 @@ BLOWN_ACCOUNTS=(
   'PPNTPPX50024895000001'  # dead account, chief confirmed 2026-08-06
   'TDFYG50201122518'       # blown, Chris confirmed "Nope. Blown" 2026-08-06 morning brief via fable-reviewer
   'APEX4333770000091'      # blown, Chris confirmed "91 is blown. Intraday drawdown hit." 2026-08-14 13:22:18Z direct to fable-reviewer. Both strategies (H137 + MarketOpenFlip) went stale together 2026-08-13 22:15/22:16Z = Apex-side termination. Note: eod_balance showed +$9,625 / $315,013.20 on 08-13 — an EOD close can never exclude an intraday drawdown breach.
+  'PAAPEX4333770000001'    # PA closed, Chris confirmed Aug-20 (accounts graduated/rotated)
+  'PAAPEX4333770000003'    # PA closed, Chris confirmed Aug-20
+  'PAAPEX4333770000010'    # PA closed, Chris confirmed Aug-20
+  'PAAPEX4333770000017'    # PA closed, Chris confirmed Aug-20; also was the former PILOT_ACCOUNT — pilot concept now retired
 )
 
 # Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
 # Each entry MUST carry a reason and a removal condition.
 SUPPRESSED_PAIRS=(
   'PPNTF100024895000002|MarketOpenFlip'  # tombstone-gap: detached strategy, pending Chris decision — remove when task_1784882768044 ships
+  'LTE05059758350008|MarketOpenFlip'  # relic: strategy disabled; remove after strategy_states cleanup sweep clears this row
+  'LTE05059758350009|LucidProFlip'    # relic: strategy disabled; remove after strategy_states cleanup sweep clears this row
 )
 # REMOVED 2026-08-14: 'APEX4333770000091|MarketOpenFlip' (tombstone-gap, added 2026-07-30, removal
 # condition "after Chris confirms in morning brief"). Condition met — Chris confirmed the ACCOUNT
@@ -124,15 +133,21 @@ is_live_account() {
   printf '%s\n' "$LIVE_ACCOUNTS" | grep -qxF "$acct"
 }
 
-# Check pilot account first — P0 if stale/absent
-PILOT_AGE=$(psql_q "
-  SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - last_seen)) / 60)::int
-  FROM strategy_states
-  WHERE account_name='${PILOT_ACCOUNT}' AND strategy_name='${PILOT_STRATEGY}'
-  ORDER BY last_seen DESC LIMIT 1;")
+# Check pilot account first — P0 if stale/absent.
+# Skipped entirely when PILOT_ACCOUNT is empty (pilot retired): without this guard the
+# query would match no row, PILOT_AGE would come back empty, and PILOT_P0 would latch to
+# 1 — firing a permanent RED on an account that no longer exists.
+PILOT_AGE=""
 PILOT_P0=0
-if [ -z "$PILOT_AGE" ] || [ "${PILOT_AGE:-0}" -gt 120 ]; then
-  PILOT_P0=1
+if [[ -n "$PILOT_ACCOUNT" ]]; then
+  PILOT_AGE=$(psql_q "
+    SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - last_seen)) / 60)::int
+    FROM strategy_states
+    WHERE account_name='${PILOT_ACCOUNT}' AND strategy_name='${PILOT_STRATEGY}'
+    ORDER BY last_seen DESC LIMIT 1;")
+  if [ -z "$PILOT_AGE" ] || [ "${PILOT_AGE:-0}" -gt 120 ]; then
+    PILOT_P0=1
+  fi
 fi
 
 # ACTIVE ROSTER: strategies seen within 48h = expected to run today.
@@ -221,7 +236,7 @@ done <<< "$STALE_ROWS"
 
 # All stale rows were known false-positives — not a RED (unless pilot is P0).
 if [ "$STALE_COUNT" -eq 0 ]; then
-  if [ "$PILOT_P0" -eq 1 ]; then
+  if [[ -n "$PILOT_ACCOUNT" ]] && [ "$PILOT_P0" -eq 1 ]; then
     # F1 (post-loop path): every other stale row was suppressed but pilot is P0.
     # Inject pilot into the stale list so the RED alert path fires.
     STALE_LIST="  ${PILOT_STRATEGY} / ${PILOT_ACCOUNT}: ${PILOT_AGE:-absent}${PILOT_AGE:+min} stale — pilot P0"$'\n'
