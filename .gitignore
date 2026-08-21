@@ -74,3 +74,8 @@ docs/phase-reports/
 leakage-fixture.json
 **/leakage-fixture.json
 *.leakage-fixture.json
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
