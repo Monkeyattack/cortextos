@@ -52,6 +52,7 @@ BLOWN_ACCOUNTS=(
   'PAAPEX4333770000003'    # PA closed, Chris confirmed Aug-20
   'PAAPEX4333770000010'    # PA closed, Chris confirmed Aug-20
   'PAAPEX4333770000017'    # PA closed, Chris confirmed Aug-20; also was the former PILOT_ACCOUNT — pilot concept now retired
+  'LDE05059758350001'    # orphan, unregistered, no executions, dark since 2026-08-18; chief confirmed suppress 2026-08-21
 )
 
 # Known false-positives: account_name|strategy_name pairs excluded from RED alerts.
