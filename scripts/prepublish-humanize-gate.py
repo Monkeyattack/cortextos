@@ -35,6 +35,8 @@ import json
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 SKILL_DIR = Path(
@@ -57,6 +59,83 @@ HIDDEN = re.compile(
 )
 
 MAX_CHUNK_CHARS = 2000
+
+
+_SERVER_URL = "http://127.0.0.1:8421"
+_SERVER_API_KEY = "internal-prewarm"
+
+
+def try_server_score(
+    chunks: list[tuple[str, str]],
+    threshold: float,
+    tier: str,
+) -> list[dict] | None:
+    """Try scoring all chunks via the persistent untell-server HTTP API.
+
+    Returns a list of per-chunk result dicts (same keys the in-process path
+    produces) if the server is reachable AND responds with full-tier results.
+
+    Returns None — signaling to fall back to in-process loading — if:
+    - the /health endpoint is unreachable or slow
+    - /health does not report detector_tier == 'full'
+    - any /score call fails (non-200 status, parse error, unexpected shape)
+    - any /score response reports tier != 'full'
+
+    Never emits PASS or DEGRADED on its own. All verdicts remain in main().
+    """
+    # Step 1: verify server is up and running full-tier detectors.
+    try:
+        req = urllib.request.Request(
+            f"{_SERVER_URL}/health",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            health = json.loads(resp.read().decode())
+        if health.get("detector_tier") != "full":
+            return None  # server is lite — fall back to in-process
+    except Exception:
+        return None  # server down or slow — fall back to in-process
+
+    # Step 2: score each chunk.
+    results: list[dict] = []
+    auth_header = f"Bearer {_SERVER_API_KEY}"
+    for label, body in chunks:
+        try:
+            payload = json.dumps(
+                {"text": body, "tier": "full", "threshold": threshold}
+            ).encode()
+            req = urllib.request.Request(
+                f"{_SERVER_URL}/score",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Authorization": auth_header,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                res = json.loads(resp.read().decode())
+        except Exception:
+            return None  # any single chunk failure → fall back entirely
+
+        # Require that the server actually ran full-tier scoring.
+        if res.get("tier") != "full":
+            return None
+
+        results.append(
+            {
+                "section": label,
+                "chars": len(body),
+                "max": res.get("max"),
+                "flagged": float(res.get("max") or 0.0) >= threshold,
+                "tier": res.get("tier"),
+                "detectors": res.get("detectors"),
+                "warning": res.get("warning"),
+            }
+        )
+    return results
 
 
 def reexec_under_untell_python() -> None:
@@ -242,26 +321,40 @@ def main(argv: list[str] | None = None) -> int:
         emit(report, args.json)
         return 1
 
-    score_text = load_untell()
     chunks = chunk(text)
-    results = []
+
+    # Try the persistent model server first. It keeps models warm and avoids the
+    # 10+ minute cold-start that causes site_manager timeouts. Falls back to
+    # in-process loading if the server is down, unresponsive, or returns anything
+    # other than confirmed full-tier results. The server path is NEVER used when
+    # --tier is explicitly set to 'lite' (in-process path handles that).
+    results = None
+    if args.tier != "lite":
+        results = try_server_score(chunks, args.threshold, args.tier)
+
+    if results is None:
+        # Fall back to in-process loading (original path).
+        score_text = load_untell()
+        results = []
+        for label, body in chunks:
+            res = score_text(body, tier=args.tier, threshold=args.threshold)
+            results.append(
+                {
+                    "section": label,
+                    "chars": len(body),
+                    "max": res.get("max"),
+                    "flagged": float(res.get("max") or 0.0) >= args.threshold,
+                    "tier": res.get("tier"),
+                    "detectors": res.get("detectors"),
+                    "warning": res.get("warning"),
+                }
+            )
+
     worst = 0.0
     tiers = set()
-    for label, body in chunks:
-        res = score_text(body, tier=args.tier, threshold=args.threshold)
-        tiers.add(res.get("tier"))
-        worst = max(worst, float(res.get("max") or 0.0))
-        results.append(
-            {
-                "section": label,
-                "chars": len(body),
-                "max": res.get("max"),
-                "flagged": float(res.get("max") or 0.0) >= args.threshold,
-                "tier": res.get("tier"),
-                "detectors": res.get("detectors"),
-                "warning": res.get("warning"),
-            }
-        )
+    for r in results:
+        tiers.add(r.get("tier"))
+        worst = max(worst, float(r.get("max") or 0.0))
     report["sections"] = results
     report["max"] = round(worst, 4)
     report["tier_ran"] = sorted(t for t in tiers if t)
